@@ -1,0 +1,401 @@
+CHAPTER 6
+CONCLUSIONS AND FUTURE WORK
+
+6.1
+
+Overview and rationale
+
+Over the preceding chapters, this thesis combined experimental tools and mechanistic modeling to dissect how stomata integrate hydraulic and biochemical
+signals from soil to leaf to regulate water loss under water stress. In maize, a
+hydropassive model informed by AquaDust measurements[1, 2, 3] and a slac1
+stomatal mutant[4] quantified the contribution of pure hydraulics to stomatal
+regulation and highlighted further the role of a large outside-xylem (OXZ) resistance that can dominate non-stomatal limitations to transpiration. In Arabidopsis, a HP–HA model of guard-cell–autonomous abscisic acid (ABA) synthesis
+and signaling showed that ABA autoregulation mediated through the PYR–
+PP2C–OST1–SLAC1 core signaling module[5, 6] can generate both damped and
+persistent oscillations in stomatal conductance and the hysteretic “stress memory” observed during drought and recovery. In cotton, AquaDust-based characterization of OXZ conductance and g s /goxz across genotypes and vapor pressure
+deficit (VPD) demonstrated that a C3 crop can exhibit measurable intercellular airspace undersaturation while remaining predominantly stomata-limited.
+Finally, a Richards-equation soil model coupled to AquaSheet measurements
+showed that standard soil hydraulic parameterizations can fail dramatically in
+the extremely dry regime relevant to severe drought.
+In what follows, I organize future work into four interrelated themes:
+species-specific integration of hydropassive and ABA-mediated hydroactive
+modules; coupling ABA-driven stomatal regulation with the OnGuard platform
+1
+
+and A–g s modeling; extending the HP–HA framework to Ca2+ , ROS, and longdistance signaling; and coupling soil drying with stomatal regulation to form a
+unified model of the soil–plant–atmosphere continuum (SPAC).
+
+6.2
+
+Species-specific unified hydropassive–hydroactive models
+
+A key limitation of the current work is that the hydropassive model is parameterized and tested primarily in maize, whereas the ABA HP–HA model is built
+around Arabidopsis data and genetic resources. This division was advantageous for leveraging species-specific tools such as AquaDust and maize slac1
+for hydraulics, Arabidopsis ABA mutants for understanding hydroactive stomatal regulation. But it leaves open how hydraulics and ABA interact within a
+single species to shape stomatal responses under water stress. The next step
+is to construct a unified HP–HA model in a single species, such as maize or
+cotton, in which both hydraulic and ABA modules are jointly constrained by
+genotype-resolved data.
+In maize, the existing hydropassive model treats mesophyll, subsidiary cells,
+and guard cells as lumped elements connected by hydraulic resistances and capacitances, with g s proportional to the turgor difference between guard and
+subsidiary cells. The model is currently calibrated against slac1 data, where
+HA regulation is genetically suppressed, and then used to infer the implicit
+HA contribution in wildtype. Future work could embed the ABA autoregulation and signaling module developed for Arabidopsis directly into this maize
+HP framework, creating a species-specific HP–HA model in which guard-cell
+ABA synthesis, ABA positive feedback, and catabolism via CYP707A-family en-
+
+2
+
+zymes control SLAC1 activation and guard-cell osmotic potential. Such a model
+would explicitly connect the hydraulic variables measured by AquaDust (xylem
+and OXZ water potentials) to ABA dynamics and would allow quantitative partitioning of maize drought responses into OXZ hydraulics versus ABA feedback
+under realistic field-like conditions.
+In cotton, the current AquaDust results show that despite measurable OXZ
+undersaturation, g s /goxz remains small, keeping cotton in a stomata-dominated
+regime across the sampled ψ xyl −V PD space. A unified HP–HA model calibrated
+on wildtype and GhSLAC1 mutants could test whether species-specific differences in guard-cell elasticity, OXZ vulnerability curves, or ABA feedback can
+explain why cotton rarely shifts into a strongly non-stomatal regime. Comparative modeling between maize and cotton would directly test the hypothesis that
+differences in OXZ vulnerability and HA gains underpin species contrasts in
+intrinsic water-use efficiency.
+
+6.3
+
+Coupling ABA-driven stomatal regulation with OnGuard
+and A–g s modeling
+
+At present, the Arabidopsis ABA HP–HA model in this thesis resolves ABA
+autoregulation, PYR–PP2C–OST1–SLAC1 signaling, and coarse-grained guardcell electrophysiology, while treating Ca2+ implicitly and focusing on K+ and
+Cl− fluxes. The OnGuard platform developed by Blatt and colleagues provides
+a complementary, guard cell membrane electrophysiology-focused framework.
+The original OnGuard implementation and its companion systems-dynamics
+analysis resolve plasma membrane and tonoplast ion channels and pumps,
+3
+
+including Ca2+ handling, detailed voltage dynamics, and metabolism of major osmotica under changing light and CO2 [7, 8]. Subsequent extensions (often referred to as OnGuard2) bridged guard-cell to leaf scales and introduced
+a “relative-water-feed factor” to represent leaf water status, allowing predictions of transpiration responses to humidity, temperature, and water availability without explicitly resolving the upstream hydraulic circuit[9, 10].
+A logical future direction is to integrate these approaches by replacing
+OnGuard’s phenomenological “hard-wired” ABA input (as in OnGuard3e[11])
+with a mechanistic ABA autoregulation module driven by guard-cell turgor and
+by coupling its electrophysiology to a hydraulically explicit hydropassive (HP)
+module. In such a hybrid ABA–OnGuard–HP model, step changes in VPD or
+ψ xyl would first alter guard-cell turgor via the HP module, triggering stressdependent ABA synthesis V stress (Pg ), ABA positive feedback, and catabolic negative feedback via A8H; ABA would then bind PYR receptors, inhibit PP2C,
+activate OST1, and thereby modulate SLAC1 and related channels within the
+OnGuard core, leading to changes in membrane potential and guard-cell osmotic potential. Because the HP module explicitly resolves xylem and SSC
+apoplastic water potentials, this framework would link AquaDust-measured
+2+
+ψ xyl and ψapo
+ssc directly to ABA dynamics, Ca signaling, and ion transport, rather
+
+than treating water status as an external “relative-water-feed” factor. Existing
+OnGuard models have focused primarily on light and CO2 responses and, notably, revealed a “carbon memory” whereby guard-cell endomembrane Ca2+ ATPases lead to carbon hysteresis[12]. By contrast, the ABA HP–HA model
+developed in this thesis predicts a complementary “water-stress memory” arising from ABA autoregulation and its bistable response to xylem water potential during drought and recovery. Integrating these two lines of work would
+
+4
+
+enable mechanistic exploration of how carbon and water-stress memories interact, for example, how a history of fluctuating CO2 and light, encoded via
+Ca2+ -dependent feedback, combines with a history of drought, encoded via
+ABA feedback, to shape subsequent stomatal responses, photosynthesis, and
+intrinsic water-use efficiency.
+Embedding the integrated ABA–OnGuard–HP module into leaf-scale A–
+g s models would provide a pathway from guard cell-scale signaling to
+canopy-scale carbon and water fluxes. At the leaf and canopy scales, most
+photosynthesis-transpiration models still treat stomatal conductance using empirical formulations such as Ball–Berry[13] or Medlyn[14] models, which relate
+g s to photosynthetic assimilation, atmospheric CO2 , and VPD via fitted parameters and assume that stomata present the dominant resistance to water vapor
+flux, thereby neglecting losses of outside-xylem conductance and intercellular
+airspace undersaturation. The maize and cotton chapters in this thesis demonstrate that such assumptions can fail under moderate drought. In maize, g s /goxz
+can approach 0.3–0.5, causing substantial intercellular airspace undersaturation
+and non-stomatal control of transpiration, whereas in cotton, g s /goxz remains
+small but ψapo
+ssc can still fall several MPa below ψ xyl . Future work should therefore
+replace empirical g s models in A–g s frameworks with mechanistic predictions
+from ABA–OnGuard–HP models that account for both hydraulic and biochemical state variables and use these models to explore how different combinations
+of OXZ vulnerability, ABA feedback gains, and guard-cell electrophysiological
+properties shape the co-evolution of A, E, and A/E during soil drying and rewetting.
+By extending OnGuard’s original scope beyond light and CO2 to encom-
+
+5
+
+pass ABA-mediated water stress responses, and by anchoring the model in
+explicit leaf and soil hydraulics, this future work would move toward truly
+ecophysiology-ready stomatal models.
+
+Such models could predict species-
+
+specific responses under a wider range of environmental conditions including
+fluctuating VPD, CO2 , light, and soil water status and provide mechanistic insight into water-use efficiency from both the water and assimilation perspectives.
+
+6.4
+
+Extending the HP–HA framework to Ca2+ , ROS, and longdistance signaling
+
+The current ABA HP–HA model treats Ca2+ implicitly, black-boxing its effects
+into coarse-grained rate laws for ion fluxes and membrane voltage while holding symplastic pH fixed. Ca2+ dynamics in guard cells, however, form an important secondary messenger system that amplifies and encodes information about
+ABA[15]. These Ca2+ signals act through a kinase branch parallel to the OST1
+branch that converges on SLAC1[16, 17, 18, 19]. In the Ca2+ -dependent branch,
+CPKs directly phosphorylate the SLAC1 N-terminus and are themselves negatively regulated by PP2C phosphatases such as ABI1. The OSCA family of
+hyperosmolality-gated, Ca2+ -permeable channels provides a mechanosensing
+entry point into this network. OSCA1 mediates osmotic-stress-evoked cytosolic
+Ca2+ increases needed for osmosensing, and osca1 mutants show attenuated regulation of transpiration under osmotic stress[20]. Because our current V stress (δPg )
+formulation is agnostic about which molecular sensors convert turgor into a
+biochemical signal, incorporating an OSCA-like Ca2+ module where guard-cell
+
+6
+
+turgor changes computed by the HP module drive mechanosensitive Ca2+ influx into the CPK branch would allow Ca2+ -dependent effects on SLAC1 and
+related targets to be captured explicitly and analyzed via bifurcation tools (Appendix B), yielding testable hypotheses in osca1 and cpk mutants.
+A critical dimension of such an extension is the integration of guard-cell Ca2+
+signaling with long-distance hydraulic signals and with the experimental tools
+needed to constrain the resulting models. Recent work by Bacheva et al.[21] introduces a unifying poroelastic framework that captures both local and systemic
+hydraulic responses to wounding and predicts ψ xyl (t) relaxation dynamics that
+depend on transpiration. Feeding these poroelastic ψ xyl (t) trajectories into the
+HP–HA–Ca2+ model would create a mechanistic bridge between whole-plant
+hydraulic states and guard-cell responses, in which Ca2+ signals and ABA synthesis respond explicitly to plant-scale hydraulics, enabling predictions for soil
+drought (slow, abiotic), wounding (fast, biotic), or their combinations. Testing these mechanistic models requires tools that can simultaneously report Ca2+
+dynamics and physiological output with sufficient spatial and temporal resolution. Genetically encoded Ca2+ reporter plants now make it possible to visualize
+stimulus-specific Ca2+ transients in vivo across a range of timescales and spatial
+scales[22, 23, 24]. Combining these Ca2+ reporters with AquaDust measurements and LI-COR-based gas exchange would create a phenotyping platform
+in which molecular Ca2+ signals are directly correlated with the hydraulic and
+physiological state variables that drive the model, providing the observational
+constraints needed for parameter inference and validation.
+Reactive oxygen species (ROS) are another major axis of guard-cell signaling
+that the current HP–HA model does not resolve explicitly. ABA activates the
+
+7
+
+NADPH oxidases AtRBOHD and AtRBOHF in guard cells, generating apoplastic H2 O2 bursts that in turn activate Ca2+ -permeable channels, modulate SLAC1,
+and drive stomatal closure[25, 26]. More recently, work from the Woodson laboratory at the University of Arizona has shown that chloroplast-derived ROS
+signals form a part of specialized signaling networks[27, 28]. These findings
+point to a richer ROS landscape in guard cells than is currently captured and
+motivate the inclusion of a minimal ROS module in the HP–HA framework,
+enabling exploration of combined stress scenarios such as heat plus drought,
+where ROS production is elevated independently of ABA, and prediction of
+how such stresses modify stomatal responses. Genetically encoded ROS reporters of cellular ROS[29, 30] could be combined with the Ca2+ imaging and
+AquaDust platforms described above to simultaneously monitor ROS, Ca2+ ,
+and hydraulic state. This multi-signal approach would provide rich observational constraints for the extended model and help dissect the specificity with
+which each molecular mechanism contributes to stomatal regulation, a central
+question in the rapidly expanding field of long-distance signaling in plants[31,
+32].
+
+6.5
+
+Coupling soil drying, root uptake, and stomatal regulation
+
+The soil chapter shows that a standard 1D Richards-equation model with van
+Genuchten retention and Philip de Vries vapor conductivity can be tuned to fit
+moderate soil-drying data but fails once soil dries beyond −20 to −30 MPa at
+the surface. This breakdown reflects extrapolation of constitutive soil relations
+beyond their calibration range and omission of heterogeneity effects and underscores that soil hydraulic behavior in the extremely dry regime remains poorly
+8
+
+constrained. Independent work using neutron radiography and hydraulic modeling indicates that stomatal downregulation may be initiated by hydraulic limitations at the root–soil interface rather than by xylem embolism or leaf-level
+events[33, 34].
+A future direction is to couple the Richards-based soil model to a root water
+uptake module and then to the HP–HA stomatal model, creating an integrated
+soil-root-xylem-leaf framework constrained by AquaSheet and AquaDust measurements. AquaSheet-derived ψ soil (z, t) profiles would feed into a root uptake
+model that accounts for root length density and rhizosphere conductivity[35,
+33], which in turn provides xylem boundary conditions to the leaf HP module.
+2+
+The HP–HA model would then predict g s , ψapo
+ssc , ABA, Ca , and ROS dynamics,
+
+closing the loop with transpiration and feeding back on soil drying. This integrated framework would allow studying the SPAC under different soils and
+atmospheric forcing.
+
+6.6
+
+Concluding perspective
+
+The modeling work in this thesis highlights the importance of rigorous parameter inference and identifiability analysis. The maize hydropassive model uses
+MCMC with Bayesian learning to quantify posterior distributions and parameter correlations, revealing which parameters are tightly constrained and which
+remain weakly identified by the steady-state data. The ABA HP–HA model similarly relies on non-dimensionalization and sequential fitting to isolate key dimensionless groups governing oscillations and hysteresis. Future work should
+generalize these inference pipelines to include additional observables such as
+
+9
+
+Ca2+ and ROS data.
+In this thesis, we develop a mechanistic framework that reconciles five
+decades of stomatal physiology and genetic evidence into a unified, quantitative model of stomatal regulation. The fact that such a synthesis was missing
+for so long underscores the need for shared tools so similar gaps do not persist
+in the future. One avenue is to develop open-source inference tools that allow
+other laboratories to fit HP–HA models to their own gas-exchange, hydraulic,
+and signaling datasets, thereby lowering the barrier to mechanistic modeling
+of stomata. To that end, we demonstrate how hosting interactive dashboards
+for model exploration and parameter fitting, for example, the publicly available stomatal conductance modeling dashboards at https://desai-sahil.
+github.io/stomatal-conductance-model/, can serve as powerful tools
+for sharing models, visualizing fits, and engaging users with varying levels of
+quantitative expertise. In the current landscape of advanced AI-assisted coding
+and analysis tools, such dashboards provide a flexible way to couple transparent mechanistic models to user-friendly interfaces, enabling rapid iteration on
+hypotheses and a more accessible pathway from raw experimental data to rigorously inferred parameters.
+The future directions outlined above aim to extend this framework toward
+species-specific, unified models that integrate hydraulics, ABA, Ca2+ , ROS, and
+photosynthesis across scales from soil to canopy. Pursuing these projects will
+require coordinated advances in experiments, modeling, and integration with
+genetics, breeding, and field-scale measurements, but offers a path toward predictive platforms that can inform the design of crops and management strategies resilient to a warming and increasingly water-limited world.
+
+10
+
+References
+[1] Piyush Jain et al. “A minimally disruptive method for measuring water
+potential in planta using hydrogel nanoreporters”. In: Proceedings of the
+National Academy of Sciences 118 (23 June 2021), e2008276118. DOI: 10 .
+1073/pnas.2008276118. URL: http://www.pnas.org/content/
+118/23/e2008276118.abstract.
+[2] Piyush Jain et al. “Localized measurements of water potential reveal large
+loss of conductance in living tissues of maize leaves”. In: Plant Physiology 194 (4 Apr. 2024), pp. 2288–2300. ISSN: 0032-0889. DOI: 10 . 1093 /
+plphys / kiad679. URL: https : / / doi . org / 10 . 1093 / plphys /
+kiad679.
+[3] Piyush Jain et al. “Loss of conductance between mesophyll symplasm
+and intercellular air spaces explains nonstomatal control of transpiration”. In: Proceedings of the National Academy of Sciences 122 (47 Nov.
+2025). doi: 10.1073/pnas.2504862122, e2504862122. DOI: 10 . 1073 /
+pnas . 2504862122. URL: https : / / doi . org / 10 . 1073 / pnas .
+2504862122.
+[4] Robert J Twohey et al. “Investigating the role of stomatal dynamics on
+agronomic traits using a slac1-2 Zea mays mutant”. In: bioRxiv (Jan. 2025),
+p. 2025.01.21.634166. DOI: 10.1101/2025.01.21.634166. URL: http:
+/ / biorxiv . org / content / early / 2025 / 01 / 24 / 2025 . 01 . 21 .
+634166.abstract.
+[5] Sean R Cutler et al. “Abscisic acid: emergence of a core signaling network.” In: Annual review of plant biology 61 (2010), pp. 651–679. ISSN:
+
+11
+
+1545-2123 (Electronic). DOI: 10 . 1146 / annurev - arplant - 042809 112122.
+[6] Po-Kai Hsu et al. “Signaling mechanisms in abscisic acid-mediated stomatal closure”. In: The Plant Journal 105 (2 Jan. 2021), pp. 307–321. ISSN: 09607412. DOI: https://doi.org/10.1111/tpj.15067. URL: https:
+//doi.org/10.1111/tpj.15067.
+[7] Zhong-Hua Chen et al. “Systems Dynamic Modeling of the Stomatal
+Guard Cell Predicts Emergent Behaviors in Transport, Signaling, and Volume Control”. In: Plant Physiology 159 (3 July 2012), pp. 1235–1251. ISSN:
+0032-0889. DOI: 10.1104/pp.112.197350. URL: https://doi.org/
+10.1104/pp.112.197350.
+[8] Adrian Hills et al. “OnGuard, a computational platform for quantitative
+kinetic modeling of guard cell physiology”. In: Plant physiology 159 (3
+2012), pp. 1026–1042. ISSN: 1532-2548.
+[9] Mareike Jezek et al. “A constraint–relaxation–recovery mechanism for
+stomatal dynamics”. In: Plant, Cell & Environment 42 (8 Aug. 2019).
+https://doi.org/10.1111/pce.13568, pp. 2399–2410. ISSN: 0140-7791. DOI:
+https://doi.org/10.1111/pce.13568. URL: https://doi.org/
+10.1111/pce.13568.
+[10] Yizhou Wang et al. “Unexpected Connections between Humidity and
+Ion Transport Discovered Using a Model to Bridge Guard Cell-to-Leaf
+Scales”. In: The Plant Cell 29 (11 Nov. 2017), pp. 2921–2939. ISSN: 10404651. DOI: 10.1105/tpc.17.00694. URL: https://doi.org/10.
+1105/tpc.17.00694.
+
+12
+
+[11] Thanh-Hao Nguyen et al. “OnGuard3e: A predictive, ecophysiologyready tool for gas exchange and photosynthesis research”. In: Plant, Cell
+& Environment 46 (11 Nov. 2023), pp. 3644–3658. ISSN: 0140-7791. DOI:
+https : / / doi . org / 10 . 1111 / pce . 14674. URL: https : / / doi .
+org/10.1111/pce.14674.
+[12] Mareike Jezek et al. “Guard cell endomembrane Ca2+-ATPases underpin
+a ’carbon memory’ of photosynthetic assimilation that impacts on wateruse efficiency”. In: Nature Plants 7 (9 2021), pp. 1301–1313. ISSN: 2055-026X.
+DOI : 10.1038/s41477-021-00966-2. URL : http://dx.doi.org/
+
+10 . 1038 / s41477 - 021 - 00966 - 2 % 20https : / / www . ncbi . nlm .
+nih.gov/pubmed/34326530.
+[13] J Timothy Ball, Ian E Woodrow, and Joseph A Berry. “A Model Predicting
+Stomatal Conductance and its Contribution to the Control of Photosynthesis under Different Environmental Conditions”. In: Progress in Photosynthesis Research: Volume 4 Proceedings of the VIIth International Congress
+on Photosynthesis Providence, Rhode Island, USA, August 10–15, 1986. Ed.
+by J Biggins. Springer Netherlands, 1987, pp. 221–224. ISBN: 978-94-0170519-6. DOI: 10 . 1007 / 978 - 94 - 017 - 0519 - 6 _ 48. URL: https :
+//doi.org/10.1007/978-94-017-0519-6_48.
+[14] Belinda E Medlyn et al. “Reconciling the optimal and empirical approaches to modelling stomatal conductance”. In: Global Change Biology
+17 (6 June 2011), pp. 2134–2144. ISSN: 1354-1013. DOI: https : / / doi .
+org/10.1111/j.1365-2486.2010.02375.x. URL: https://doi.
+org/10.1111/j.1365-2486.2010.02375.x.
+[15] Shouguang Huang et al. “Calcium signals in guard cells enhance the efficiency by which abscisic acid triggers stomatal closure”. In: New Phytolo13
+
+gist 224 (1 Oct. 2019), pp. 177–187. ISSN: 0028-646X. DOI: https://doi.
+org/10.1111/nph.15985. URL: https://doi.org/10.1111/nph.
+15985.
+[16] Benjamin Brandt et al. “Reconstitution of abscisic acid activation of
+SLAC1 anion channel by CPK6 and OST1 kinases and branched ABI1
+PP2C phosphatase action”. In: Proceedings of the National Academy of Sciences of the United States of America 109 (26 June 2012), pp. 10593–10598.
+ISSN : 1091-6490. DOI : 10 . 1073 / pnas . 1116590109. URL : https : / /
+
+pubmed.ncbi.nlm.nih.gov/22689970%20https://www.ncbi.
+nlm.nih.gov/pmc/articles/PMC3387046/.
+[17] Tae Houn Kim et al. “Guard cell signal transduction network: Advances
+in understanding abscisic acid, CO2, and Ca2+ signaling”. In: Annual Review of Plant Biology 61 (June 2010), pp. 561–591. ISSN: 15435008. DOI: 10.
+1146/ANNUREV-ARPLANT-042809-112226.
+[18] Shintaro Munemasa et al. “Mechanisms of abscisic acid-mediated control
+of stomatal aperture.” In: Current opinion in plant biology 28 (Dec. 2015),
+pp. 154–162. ISSN: 1879-0356 (Electronic). DOI: 10.1016/j.pbi.2015.
+10.010.
+[19] Julian I Schroeder et al. “Guard cell signal transduction”. In: Annual Review of Plant Biology 52 (2001), pp. 627–658. ISSN: 15435008. DOI: 10 .
+1146/ANNUREV.ARPLANT.52.1.627.
+[20] Fang Yuan et al. “OSCA1 mediates osmotic-stress-evoked Ca2+ increases
+vital for osmosensing in Arabidopsis.” In: Nature 514 (7522 Oct. 2014),
+pp. 367–371. ISSN: 1476-4687 (Electronic). DOI: 10.1038/nature13593.
+
+14
+
+[21] Vesna Bacheva et al. “A unified framework for hydromechanical signaling can explain transmission of local and long-distance signals in
+plants”. In: Proceedings of the National Academy of Sciences 122 (17 Apr.
+2025). doi: 10.1073/pnas.2422692122, e2422692122. DOI: 10 . 1073 /
+pnas . 2422692122. URL: https : / / doi . org / 10 . 1073 / pnas .
+2422692122.
+[22] Annalisa Bellandi et al. “Diffusion and bulk flow of amino acids mediate calcium waves in plants”. In: Science Advances 8 (42 June 2022). doi:
+10.1126/sciadv.abo6693, eabo6693. DOI: 10 . 1126 / sciadv . abo6693.
+URL : https://doi.org/10.1126/sciadv.abo6693.
+
+[23] Nana F Keinath et al. “Live Cell Imaging with R-GECO1 Sheds Light
+on flg22- and Chitin-Induced Transient [Ca2+]cyt Patterns in Arabidopsis”. In: Molecular Plant 8 (8 2015), pp. 1188–1200. ISSN: 1674-2052. DOI:
+https : / / doi . org / 10 . 1016 / j . molp . 2015 . 05 . 006. URL:
+https : / / www . sciencedirect . com / science / article / pii /
+S1674205215002397.
+[24] Masatsugu Toyota et al. “Glutamate triggers long-distance, calcium-based
+plant defense signaling”. In: Science 361 (6407 Sept. 2018). doi: 10.1126/science.aat7744, pp. 1112–1115. DOI: 10.1126/science.aat7744. URL:
+https://doi.org/10.1126/science.aat7744.
+[25] June M Kwak et al. “NADPH oxidase AtrbohD and AtrbohF genes function in ROS-dependent ABA signaling in Arabidopsis”. In: The EMBO
+Journal 22 (11 2003), pp. 2623–2633. ISSN: 1460-2075. DOI: 10 . 1093 /
+emboj/cdg277. URL: https://doi.org/10.1093/emboj/cdg277.
+[26] Zhen-Ming Pei et al. “Calcium channels activated by hydrogen peroxide
+mediate abscisic acid signalling in guard cells”. In: Nature 406 (6797 2000),
+15
+
+pp. 731–734. ISSN: 1476-4687. DOI: 10.1038/35021067. URL: https:
+//doi.org/10.1038/35021067.
+[27] Matthew D Lemke and Jesse D Woodson. “A genetic screen for dominant chloroplast reactive oxygen species signaling mutants reveals life
+stage-specific singlet oxygen signaling networks”. In: Frontiers in Plant
+Science Volume 14 - 2023 (2024). ISSN: 1664-462X. URL: https://www.
+frontiersin . org / journals / plant - science / articles / 10 .
+3389/fpls.2023.1331346.
+[28] Jesse D Woodson et al. “Chloroplast Stress Signals: Control of Retrograde
+Signaling, Chloroplast Turn-Over, and Cell Fate Decisions”. In: Chloroplast
+Gene Expression: Regulation, Stress Signaling and Biotechnology. Ed. by Tessa
+M Burch-Smith. Springer Nature Switzerland, 2024, pp. 133–169. ISBN:
+978-3-031-70098-9. DOI: 10 . 1007 / 978 - 3 - 031 - 70098 - 9 _ 5. URL:
+https://doi.org/10.1007/978-3-031-70098-9_5.
+[29] Yosef Fichman et al. “Plasmodesmata-localized proteins and ROS orchestrate light-induced rapid systemic signaling in Arabidopsis”. In: Science
+Signaling 14 (671 Feb. 2021). doi: 10.1126/scisignal.abf0322, eabf0322. DOI:
+10.1126/scisignal.abf0322. URL: https://doi.org/10.1126/
+scisignal.abf0322.
+[30] Anthony E Postiglione and Gloria K Muday. “Abscisic Acid Drives Stomatal Closure through Increases in Hydrogen Peroxide in Mitochondria”.
+In: bioRxiv (Jan. 2022), p. 2022.01.11.475946. DOI: 10.1101/2022.01.
+11.475946. URL: http://biorxiv.org/content/early/2022/
+09/04/2022.01.11.475946.abstract.
+[31] Won-Gyu Choi et al. “Salt stress-induced Ca2+ waves are associated
+with rapid, long-distance root-to-shoot signaling in plants”. In: Pro16
+
+ceedings of the National Academy of Sciences 111 (17 Apr. 2014). doi:
+10.1073/pnas.1319955111, pp. 6497–6502. DOI: 10 . 1073 / pnas .
+1319955111. URL: https : / / doi . org / 10 . 1073 / pnas .
+1319955111.
+[32] Sarah Johns et al. “The fast and the furious: rapid long-range signaling in
+plants.” In: Plant physiology 185 (3 Apr. 2021), pp. 694–706. ISSN: 1532-2548
+(Electronic). DOI: 10.1093/plphys/kiaa098.
+[33] Andrea Carminati and Mathieu Javaux. “Soil Rather Than Xylem Vulnerability Controls Stomatal Response to Drought”. In: Trends in Plant
+Science 25 (9 2020), pp. 868–880. ISSN: 1360-1385. DOI: https : / /
+doi . org / 10 . 1016 / j . tplants . 2020 . 04 . 003. URL:
+https : / / www . sciencedirect . com / science / article / pii /
+S1360138520301187.
+[34] Sara Di Bert et al. “Early signals of water limitations begin at the root–soil
+interface: linking rhizosphere drying to water uptake decline”. In: New
+Phytologist 249 (6 Mar. 2026), pp. 2909–2918. ISSN: 0028-646X. DOI: https:
+//doi.org/10.1111/nph.70879. URL: https://doi.org/10.
+1111/nph.70879.
+[35] Andrea Carminati et al. “How the Rhizosphere May Favor Water Availability to Roots”. In: Vadose Zone Journal 10 (3 Aug. 2011).
+https://doi.org/10.2136/vzj2010.0113, pp. 988–998. ISSN: 1539-1663. DOI:
+https://doi.org/10.2136/vzj2010.0113. URL: https://doi.
+org/10.2136/vzj2010.0113.
+
+17
+
+

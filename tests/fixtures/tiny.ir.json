@@ -1,0 +1,113 @@
+{
+  "meta": {
+    "title": "A Tiny Synthetic Thesis",
+    "author": "Test Author",
+    "degree_date": "2026",
+    "profile": "committee"
+  },
+  "blocks": [
+    {
+      "id": "fm.toc",
+      "type": "frontmatter",
+      "page": 1,
+      "text": "Table of Contents"
+    },
+    {
+      "id": "ch1.h",
+      "type": "heading",
+      "chapter": 1,
+      "page": 2,
+      "text": "Introduction"
+    },
+    {
+      "id": "ch1.p1",
+      "type": "paragraph",
+      "chapter": 1,
+      "page": 2,
+      "text": "We measured gs and CO2 at p<0.05 [1]. As shown in Figure 1, slac1 reduced gs by 0.3-0.5."
+    },
+    {
+      "id": "ch1.p2",
+      "type": "paragraph",
+      "chapter": 1,
+      "page": 3,
+      "text": "ABA signaling via the PYR-PP2C-OST1-SLAC1 module shaped psi_xyl during drought [2, 3]."
+    },
+    {
+      "id": "ch2.h",
+      "type": "heading",
+      "chapter": 2,
+      "page": 4,
+      "text": "Results"
+    },
+    {
+      "id": "ch2.p1",
+      "type": "paragraph",
+      "chapter": 2,
+      "page": 4,
+      "text": "In cotton, gs/goxz remained small but ROS increased by 37% [15]."
+    },
+    {
+      "id": "ch2.sec",
+      "type": "heading",
+      "chapter": 2,
+      "section": "2.1",
+      "page": 5,
+      "text": "Gas exchange"
+    },
+    {
+      "id": "ch2.p2",
+      "type": "paragraph",
+      "chapter": 2,
+      "page": 5,
+      "text": "The osca1 mutant showed n=6 replicates with 5.2 ± 0.3 response."
+    },
+    {
+      "id": "tab1.block",
+      "type": "table",
+      "chapter": 2,
+      "page": 6,
+      "text": "raw table grid omitted"
+    },
+    {
+      "id": "eq1.block",
+      "type": "equation_display",
+      "chapter": 2,
+      "page": 6,
+      "text": "g_s = f(x)",
+      "latex": "g_s = f(x)"
+    },
+    {
+      "id": "refs",
+      "type": "reference_list",
+      "page": 7,
+      "text": "[1] Smith and Roe 2019. [2] Jones 2020. [3] Lee, Park and Kim 2021."
+    }
+  ],
+  "figures": {
+    "fig1": {
+      "id": "fig1",
+      "caption": "Fig. 1. (A) gs over time. (B) CO2 response.",
+      "ref_points": ["ch1.p1"],
+      "page": 2
+    }
+  },
+  "equations": {
+    "eq1": { "id": "eq1", "latex": "g_s = f(x)" }
+  },
+  "tables": {
+    "tab1": { "id": "tab1", "raw": "raw table grid omitted" }
+  },
+  "citations": {
+    "1": { "marker": "1", "bib_key": "smith2019" },
+    "2": { "marker": "2", "bib_key": "jones2020" },
+    "3": { "marker": "3", "bib_key": "lee2021" },
+    "15": { "marker": "15", "bib_key": "bacheva2023" }
+  },
+  "bibliography": {
+    "smith2019": { "key": "smith2019", "authors": ["Smith", "Roe"], "year": 2019, "title": "Hydraulics of stomata" },
+    "jones2020": { "key": "jones2020", "authors": ["Jones"], "year": 2020, "title": "ABA signaling" },
+    "lee2021": { "key": "lee2021", "authors": ["Lee", "Park", "Kim"], "year": 2021, "title": "Guard cell dynamics" },
+    "bacheva2023": { "key": "bacheva2023", "authors": ["Bacheva", "Mencuccini"], "year": 2023, "title": "Poroelastic signaling" }
+  }
+}

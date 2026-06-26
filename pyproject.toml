@@ -1,0 +1,59 @@
+[project]
+name = "thesis-audiobook"
+version = "0.0.0"
+description = "Convert a PhD thesis PDF into a navigable audiobook via a typed, testable pipeline."
+requires-python = ">=3.12"
+dependencies = [
+    "pydantic>=2.7",
+    "typer>=0.9",
+]
+
+[project.scripts]
+audiobook = "thesis_audiobook.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=7.4",
+    "pytest-cov>=4",
+    "hypothesis>=6",
+    "syrupy>=4",
+    "ruff>=0.5",
+    "pyright>=1.1",
+    "anthropic>=0.112.0",
+    "elevenlabs>=1.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/thesis_audiobook"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.pyright]
+include = ["src", "tests"]
+# Production code (src) is strict per the non-negotiables; tests are checked at
+# basic so pytest/hypothesis untyped decorators do not trip strict-only rules.
+typeCheckingMode = "basic"
+strict = ["src"]
+pythonVersion = "3.12"
+venvPath = "."
+venv = ".venv"
+
+[tool.pytest.ini_options]
+# Deselect live tests by default so no plain `pytest` run can spend money or hit a
+# network. Run them explicitly with `pytest -m live` (a CLI -m overrides this).
+addopts = "-q -m 'not live'"
+testpaths = ["tests"]
+markers = [
+    "live: tests that hit real external services (not run by default; select with -m live)",
+    "contract: offline contract tests that inject a fake SDK client (no real call; guard skipped)",
+]

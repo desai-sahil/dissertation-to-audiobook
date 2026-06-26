@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.hypothesis/
+.coverage
+htmlcov/
+
+# Build / run artifacts
+out/
+dist/
+build/
+.cache/
+
+# Secrets (never commit API keys; they come from the environment)
+.env
+*.key
+
+# OS
+.DS_Store

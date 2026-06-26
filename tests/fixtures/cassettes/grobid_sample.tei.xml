@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<TEI xmlns="http://www.tei-c.org/ns/1.0">
+  <text>
+    <body>
+      <p>As shown by <ref type="bibr" target="#b0">[1]</ref> and later
+        <ref type="bibr" target="#b1">[2]</ref>, the effect holds.</p>
+    </body>
+    <back>
+      <div type="references">
+        <listBibl>
+          <biblStruct xml:id="b0">
+            <analytic>
+              <author><persName><surname>Smith</surname></persName></author>
+              <author><persName><surname>Roe</surname></persName></author>
+              <title level="a">Hydraulics of stomata</title>
+            </analytic>
+            <monogr>
+              <imprint><date type="published" when="2019">2019</date></imprint>
+            </monogr>
+          </biblStruct>
+          <biblStruct xml:id="b1">
+            <analytic>
+              <author><persName><surname>Jones</surname></persName></author>
+              <title level="a">ABA signaling</title>
+            </analytic>
+            <monogr>
+              <imprint><date type="published" when="2020-04"/></imprint>
+            </monogr>
+          </biblStruct>
+        </listBibl>
+      </div>
+    </back>
+  </text>
+</TEI>

@@ -1,0 +1,15 @@
+{
+  "_comment": "Hand-authored cassette mirroring a real claude-opus-4-8 gloss response for the equation g_s = A/(c_a - c_i). Used by the offline contract test for adapters/anthropic_llm.py so complete()'s request shape and response mapping are verified without networking.",
+  "request": {
+    "prompt": "Here is a display equation from a scientific thesis, in LaTeX:\n\ng_s = \\frac{A}{c_a - c_i}\n\nIn one spoken sentence for an audiobook, say what this equation expresses (its meaning), not how it is typeset."
+  },
+  "response": {
+    "role": "assistant",
+    "stop_reason": "end_turn",
+    "content": [
+      {"type": "thinking", "thinking": "internal reasoning that must be dropped"},
+      {"type": "text", "text": "Stomatal conductance equals the assimilation rate divided by the difference between the ambient and internal carbon dioxide concentrations."}
+    ]
+  },
+  "expected_text": "Stomatal conductance equals the assimilation rate divided by the difference between the ambient and internal carbon dioxide concentrations."
+}
