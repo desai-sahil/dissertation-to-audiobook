@@ -3,77 +3,108 @@
 Convert a PhD thesis PDF into a navigable audiobook through a typed, testable pipeline:
 
 ```
-PDF -> structured IR -> reviewable spoken script (Gate B) -> cached TTS -> M4B
+PDF -> structured IR -> LLM pronunciation curation -> reviewable spoken script (Gate B)
+    -> cached TTS -> M4B / MP4 / per-chapter MP3 (with chapter markers + provenance)
 ```
 
-Status: **M0–M2 complete** (skeleton, deterministic normalization core, real parsing +
-IR cleanup). LLM equation/table glosses (M3) and ElevenLabs TTS + M4B assembly (M4) are
-not built yet, so TTS output is a deterministic silent placeholder for now.
+Every transform is pure and deterministic; all I/O (PDF parsing, LLM, TTS, ffmpeg,
+cache) lives in adapters behind ports. The same PDF and config produce the same script
+byte-for-byte, and rendered audio is content-addressed cached, so re-renders are free.
+
+Status: **M0–M5 complete.** Deterministic normalization core, real parsing (Marker/MinerU
++ GROBID, or an offline poppler fallback), LLM equation/table glosses, ElevenLabs TTS +
+ffmpeg assembly, an LLM pronunciation curator, and TOML-driven profiles. Offline runs use
+deterministic mocks (silent audio, no model calls); real audio needs the keys below.
 
 ## Prerequisites
 
 - **Python 3.12+** and **[uv](https://docs.astral.sh/uv/)** (`pip install uv`)
-- **poppler** for the offline parser — macOS: `brew install poppler` (provides `pdftotext`)
+- **poppler** for the offline parser — `brew install poppler` (provides `pdftotext`)
 
-Optional, only for the production parsing path (otherwise use `--parser poppler`):
+For real audio (otherwise everything runs offline on mocks):
 
-- **Docker** to run **GROBID** (citation linkage): `docker run --rm -p 8070:8070 grobid/grobid:0.8.0`
-- **Marker** (primary PDF parser): `uv pip install marker-pdf` (downloads several GB of ML models)
-- **ffmpeg** is only needed later, for M4 audio assembly.
+- **ffmpeg** — `brew install ffmpeg` (no admin? use micromamba/conda-forge or a static build)
+- **`ELEVENLABS_API_KEY`** + a real voice id, and **`ANTHROPIC_API_KEY`** (glosses + curator)
+
+For the highest-fidelity parser (optional; removes poppler's notation/citation artifacts):
+
+- **Docker** for **GROBID**: `docker run --rm -p 8070:8070 grobid/grobid:0.8.0`
+- **Marker**: `uv pip install marker-pdf`, then `--parser marker`
 
 ## Setup
 
 ```bash
-git clone <repo> && cd cornell-thesis-to-audiobook   # or just cd into it
-uv sync                                               # creates .venv, installs deps
+uv sync          # creates .venv, installs deps
 ```
 
-## Run it (offline — works out of the box)
-
-Parse your PDF to the cleaned IR and see structure, citation linkage, and Gate A warnings:
+## Run it offline (works out of the box, free)
 
 ```bash
-uv run audiobook parse sample/Chapter6_preview.pdf --parser poppler -o out/sample.ir.json
-open out/sample.ir.json          # the parsed IR
-```
-
-Run the whole pipeline (parse -> select -> normalize -> script -> chunk plan):
-
-```bash
+# cost estimate + chunk plan, zero external calls:
 uv run audiobook run sample/Chapter6_preview.pdf --dry-run --parser poppler
-open out/conclusions-and-future-work.script.md   # the Gate B reviewable script
+
+# full pipeline on mocks -> stand-in audio + the Gate B script:
+uv run audiobook run sample/Chapter6_preview.pdf --parser poppler --tts mock
+open out/conclusions-and-future-work.script.md     # the reviewable spoken script
 ```
 
-`--profile committee` (default) keeps citations; `--profile general` drops them.
-Swap in your own thesis by pointing at any PDF path.
+## Render real audio
+
+```bash
+export ANTHROPIC_API_KEY=...        # equation glosses + the pronunciation curator
+export ELEVENLABS_API_KEY=...
+export ELEVENLABS_VOICE_ID=...      # a real voice id (or pass --voice)
+
+uv run audiobook run sample/Chapter6_preview.pdf \
+  --parser poppler --llm anthropic --tts elevenlabs --format mp4
+open out/conclusions-and-future-work.mp4
+```
+
+Outputs land in `out/`: the audio (`.m4b`/`.mp4`/per-chapter `.mp3`), the Gate B
+`.script.md`, the `.chunks.json` plan, a `.provenance.json` sidecar (audio timestamp ->
+source block id), and `.qa.md` (what the curator decided + anything it flagged).
+
+### `run` options
+
+| Flag | Meaning |
+|---|---|
+| `--parser poppler\|marker\|mineru` | PDF parser (poppler is offline; marker is highest fidelity) |
+| `--llm mock\|anthropic` | equation glosses + pronunciation curator (anthropic costs money) |
+| `--tts mock\|elevenlabs` | speech synthesis (elevenlabs costs money; needs ffmpeg) |
+| `--format m4b\|mp4\|mp3` | one chaptered file (m4b/mp4) or one MP3 per chapter |
+| `--voice <id>` | ElevenLabs voice id (or set `ELEVENLABS_VOICE_ID`) |
+| `--profile committee\|general` | listener profile (see below) |
+| `--preview` | render the first chapter only, with the cheap flash model |
+| `--no-curate` | skip the LLM pronunciation curator |
+| `--dry-run` | cost estimate + chunk plan, zero external calls |
+| `--cache-dir <path>` | content-addressed TTS/plan cache (default `.cache/tts`) |
+
+## Profiles
+
+Profiles are validated TOML data files in
+[src/thesis_audiobook/data/profiles/](src/thesis_audiobook/data/profiles/) — edit them to
+retune without touching code. `committee` (default) glosses equations, summarizes tables,
+and speaks brief citations; `general` announces equations, skips tables, and drops citations.
+
+## The pronunciation curator
+
+With `--llm anthropic`, an LLM reads the whole document once and returns a structured
+plan: acronyms (expand on first use, then a short form), domain term pronunciations, and
+flattened-notation reads. It changes only *how* terms are said, never the prose. The plan
+is content-addressed cached (one model call per document; re-renders reuse it) and written
+to `out/<slug>.qa.md` for review. Offline (`--llm mock`) it is a no-op.
 
 ## Test it
 
 ```bash
-uv run pytest                       # full offline suite (currently 189 passed, 2 deselected)
-uv run pytest --cov=thesis_audiobook --cov-report=term-missing
-uv run pyright                      # strict type check (src) -> 0 errors
+uv run pytest                                        # full offline suite
+uv run pyright                                       # strict types (src) -> 0 errors
 uv run ruff check . && uv run ruff format --check .
+uv run pytest -m live                                # opt-in tests that hit real services
 ```
 
-The suite is fully offline: parser contract tests replay committed cassettes under
-`tests/fixtures/cassettes/`, and an autouse cost guard makes any real ElevenLabs/LLM
-call fail. Tests that need real tools or services are marked `live` and skipped by
-default.
+The suite is fully offline: parser contract tests replay committed cassettes, the LLM/TTS
+are mocked, and an autouse cost guard makes any real ElevenLabs/Anthropic call fail. Tests
+needing real tools/keys are marked `live` and skipped by default.
 
-## Production parsing path (Marker + GROBID)
-
-```bash
-# 1. start GROBID (separate terminal)
-docker run --rm -p 8070:8070 grobid/grobid:0.8.0
-# 2. install Marker
-uv pip install marker-pdf
-# 3. parse with the real tools (better math/structure fidelity than poppler)
-uv run audiobook parse sample/Chapter6_preview.pdf --parser marker -o out/marker.ir.json
-# 4. run the live integration test
-uv run pytest -m live
-```
-
-Marker/MinerU are local and free; only ElevenLabs (TTS) and the LLM cost money, and
-neither is invoked yet. See [CLAUDE.md](CLAUDE.md) and [specs/](specs/) for architecture
-and milestones.
+See [CLAUDE.md](CLAUDE.md) and [specs/](specs/) for the architecture and milestones.

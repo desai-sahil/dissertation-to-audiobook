@@ -318,25 +318,32 @@ def parse(
     typer.echo(ctx.warnings.report())
 
 
+def _use_run(verb: str) -> None:
+    typer.echo(
+        f"'{verb}' is not a separate command in this build. The whole pipeline "
+        "(parse -> script -> render -> assemble) runs through `audiobook run`; see "
+        "`audiobook run --help`.",
+        err=True,
+    )
+    raise typer.Exit(code=2)
+
+
 @app.command()
 def script(ir_json: Annotated[Path, typer.Argument(help="Path to an IR JSON file.")]) -> None:
-    """Build the reviewable script from IR. Stub: lands in M1."""
-    typer.echo(f"script: not implemented in M0 (lands in M1). input: {ir_json}")
-    raise typer.Exit(code=1)
+    """Superseded by `audiobook run` (which produces the Gate B script + chunk plan)."""
+    _use_run("script")
 
 
 @app.command()
 def render(script_md: Annotated[Path, typer.Argument(help="Path to a script file.")]) -> None:
-    """Render the script to audio via TTS. Stub: lands in M4."""
-    typer.echo(f"render: not implemented in M0 (lands in M4). input: {script_md}")
-    raise typer.Exit(code=1)
+    """Superseded by `audiobook run --tts elevenlabs` (parse through render in one pass)."""
+    _use_run("render")
 
 
 @app.command()
 def assemble(audio_dir: Annotated[Path, typer.Argument(help="Directory of audio chunks.")]) -> None:
-    """Assemble audio into an M4B. Stub: lands in M4."""
-    typer.echo(f"assemble: not implemented in M0 (lands in M4). input: {audio_dir}")
-    raise typer.Exit(code=1)
+    """Superseded by `audiobook run` (assembly + provenance are part of the pipeline)."""
+    _use_run("assemble")
 
 
 def main() -> None:

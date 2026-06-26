@@ -1,0 +1,19 @@
+# Committee profile: faithful, detailed rendering for a PhD committee.
+# Edit this data file to retune the profile; no code change needed.
+name = "committee"
+equation_tier = "gloss"          # gloss equations via the LLM
+citation_policy = "brief"        # "Smith and colleagues twenty nineteen"
+table_handling = "summarize"     # summarize tables via the LLM
+include_appendices = false
+voice_id = "mock-voice"          # set a real ElevenLabs voice id (or pass --voice)
+model_id = "eleven_multilingual_v2"
+preview_model_id = "eleven_flash_v2_5"
+output_format = "mp3_44100_128"
+apply_text_normalization = "off"  # M1 already normalized; do not double-normalize
+
+[voice_settings]
+stability = 0.5
+similarity_boost = 0.75
+style = 0.0
+use_speaker_boost = true
+speed = 1.0

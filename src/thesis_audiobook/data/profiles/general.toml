@@ -1,0 +1,18 @@
+# General profile: a leaner listen for a non-specialist audience.
+name = "general"
+equation_tier = "announce"       # announce equations, no LLM gloss
+citation_policy = "drop"         # omit citation markers entirely
+table_handling = "skip"          # skip tables with a one-line note
+include_appendices = false
+voice_id = "mock-voice"          # set a real ElevenLabs voice id (or pass --voice)
+model_id = "eleven_multilingual_v2"
+preview_model_id = "eleven_flash_v2_5"
+output_format = "mp3_44100_128"
+apply_text_normalization = "off"
+
+[voice_settings]
+stability = 0.5
+similarity_boost = 0.75
+style = 0.0
+use_speaker_boost = true
+speed = 1.0

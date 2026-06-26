@@ -1,12 +1,15 @@
 """Typed configuration and listener profiles.
 
-Profiles are data, not code branches. M0 ships defaults only; TOML profile loading
-lands in a later milestone. Secrets never live here; API keys come from the
-environment in the real adapters.
+Profiles are data, not code branches: each ships as a validated TOML file under
+data/profiles/, loaded by profile_for(). The committee_profile()/general_profile()
+constructors remain as code-level fallbacks (and the source of truth the TOML mirrors).
+Secrets never live here; API keys come from the environment in the real adapters.
 """
 
 from __future__ import annotations
 
+import importlib.resources
+import tomllib
 from typing import Literal
 
 from pydantic import Field
@@ -67,8 +70,27 @@ def general_profile() -> Profile:
     )
 
 
+def load_profile(name: str) -> Profile:
+    """Load and validate a profile from data/profiles/<name>.toml.
+
+    Falls back to the code-level default if the file is missing, so the pipeline always
+    has a valid profile even without the data files. Editing the TOML retunes a profile
+    without touching code.
+    """
+    fallback = general_profile() if name == "general" else committee_profile()
+    try:
+        text = (
+            importlib.resources.files("thesis_audiobook")
+            .joinpath(f"data/profiles/{name}.toml")
+            .read_text(encoding="utf-8")
+        )
+    except (FileNotFoundError, OSError):
+        return fallback
+    return Profile.model_validate(tomllib.loads(text))
+
+
 def profile_for(name: str) -> Profile:
-    return general_profile() if name == "general" else committee_profile()
+    return load_profile(name)
 
 
 class Config(StrictModel):
