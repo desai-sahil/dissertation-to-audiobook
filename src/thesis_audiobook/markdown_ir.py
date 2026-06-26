@@ -11,6 +11,7 @@ from __future__ import annotations
 import re
 
 from thesis_audiobook.ir import Block, BlockType, Document, DocumentMeta
+from thesis_audiobook.normalization.latex import split_display_math
 
 _HEADING = re.compile(r"^(#{1,6})\s+(.*\S)\s*$")
 _SECTION = re.compile(r"^(\d+(?:\.\d+)+)\s+(.*)$")
@@ -35,6 +36,21 @@ def markdown_to_document(markdown: str, *, title: str | None = None) -> Document
         lines = text.split("\n")
         seq += 1
         block_id = f"m{seq}"
+
+        # A standalone $$...$$ chunk is a display equation: keep the LaTeX so the math stage
+        # can gloss it, instead of letting raw LaTeX fall through as a spoken paragraph.
+        display = split_display_math(text)
+        if display is not None:
+            blocks.append(
+                Block(
+                    id=block_id,
+                    type=BlockType.equation_display,
+                    chapter=chapter,
+                    text=display,
+                    latex=display,
+                )
+            )
+            continue
 
         heading = _HEADING.match(lines[0]) if len(lines) == 1 else None
         if heading is not None:

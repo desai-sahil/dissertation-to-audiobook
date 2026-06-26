@@ -30,6 +30,7 @@ from thesis_audiobook.cleanup import (
 )
 from thesis_audiobook.context import Context
 from thesis_audiobook.ir import Block, BlockType, Document
+from thesis_audiobook.normalization.latex import clean_markup
 from thesis_audiobook.warnings import LowConfidence
 
 _BACKMATTER_HEADINGS = {"references", "bibliography"}
@@ -145,7 +146,11 @@ class BuildIrStage:
 
     def run(self, doc: Document, ctx: Context) -> Document:
         for block in doc.blocks:
-            block.text = rejoin_split_tokens(dehyphenate(normalize_ligatures(block.text)))
+            # clean_markup first turns any Marker LaTeX/HTML markup into plain tokens; it is
+            # a no-op on clean (poppler) prose, so this stays parser-agnostic.
+            block.text = rejoin_split_tokens(
+                dehyphenate(normalize_ligatures(clean_markup(block.text)))
+            )
 
         running = detect_running_artifacts(doc.blocks)
         kept = [block for block in doc.blocks if not _is_artifact(block, running)]
