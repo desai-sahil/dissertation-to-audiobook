@@ -70,6 +70,20 @@ def test_apply_plan_single_pass_no_reexpansion() -> None:
     assert apply_plan(["We used ABA today."], plan2) == ["We used abscisic acid (A B A) today."]
 
 
+def test_apply_plan_dehyphenates() -> None:
+    plan = parse_plan(
+        '{"dehyphenations":[{"broken":"me-asurable","fixed":"measurable"},'
+        '{"broken":"encom-pass","fixed":"encompass"}]}'
+    )
+    assert apply_plan(["a me-asurable effect that encom-pass all"], plan) == [
+        "a measurable effect that encompass all"
+    ]
+    # word-bounded: not matched inside a larger token
+    assert apply_plan(["Xme-asurableY and ame-asurable"], plan) == [
+        "Xme-asurableY and ame-asurable"
+    ]
+
+
 def test_apply_plan_skips_empty_keys() -> None:
     plan = parse_plan('{"terms":[{"term":"","spoken":"X"},{"term":"gene1","spoken":"arbo"}]}')
     assert apply_plan(["a gene1 b"], plan) == ["a arbo b"]

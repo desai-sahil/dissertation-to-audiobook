@@ -124,6 +124,9 @@ def _format_qa(plan: PronunciationPlan | None) -> str:
     if plan.notation:
         lines += ["## Notation", "", "| written | spoken |", "|---|---|"]
         lines += [f"| {cell(n.written)} | {cell(n.spoken)} |" for n in plan.notation] + [""]
+    if plan.dehyphenations:
+        lines += ["## De-hyphenations", "", "| broken | fixed |", "|---|---|"]
+        lines += [f"| {cell(d.broken)} | {cell(d.fixed)} |" for d in plan.dehyphenations] + [""]
     if plan.notes:
         lines += ["## Notes / flagged", ""] + [f"- {note}" for note in plan.notes]
     return "\n".join(lines) + "\n"

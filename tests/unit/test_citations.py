@@ -19,8 +19,12 @@ _BIB = {
 }
 
 
-def test_brief_multiple_authors() -> None:
-    assert spoken_citation(_BIB["smith"], "brief") == "Smith and colleagues twenty nineteen"
+def test_brief_two_authors() -> None:
+    assert spoken_citation(_BIB["smith"], "brief") == "Smith and Roe twenty nineteen"
+
+
+def test_brief_three_or_more_authors_says_and_others() -> None:
+    assert spoken_citation(_BIB["lee"], "brief") == "Lee and others twenty twenty-one"
 
 
 def test_brief_single_author() -> None:
@@ -34,7 +38,7 @@ def test_full_lists_all_authors() -> None:
 def test_resolve_brief_inline() -> None:
     assert (
         resolve_citations("we found x [1].", _CITATIONS, _BIB, "brief")
-        == "we found x Smith and colleagues twenty nineteen."
+        == "we found x Smith and Roe twenty nineteen."
     )
 
 
@@ -45,7 +49,7 @@ def test_resolve_drop_removes_marker() -> None:
 def test_resolve_group() -> None:
     assert (
         resolve_citations("see [2, 3].", _CITATIONS, _BIB, "brief")
-        == "see Jones twenty twenty; Lee and colleagues twenty twenty-one."
+        == "see Jones twenty twenty; Lee and others twenty twenty-one."
     )
 
 
@@ -60,4 +64,4 @@ def test_marker_with_unlinked_bibentry_is_dropped() -> None:
 
 
 def test_expand_et_al() -> None:
-    assert expand_et_al("Bacheva et al. showed") == "Bacheva and colleagues showed"
+    assert expand_et_al("Bacheva et al. showed") == "Bacheva and others showed"

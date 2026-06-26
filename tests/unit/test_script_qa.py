@@ -57,7 +57,7 @@ def test_citation_suppresses_inline_et_al() -> None:
     cites = {"21": Citation(marker="[21]", bib_key="k1")}
     out = resolve_citations("Recent work by Bacheva et al. [21] shows", cites, bib, "brief")
     assert out.count("Bacheva") == 1
-    assert "Bacheva and colleagues twenty twenty-five" in out
+    assert "Bacheva and others twenty twenty-five" in out
 
 
 def test_citation_handles_hyphenated_compound_name() -> None:
@@ -71,10 +71,10 @@ def test_citation_handles_hyphenated_compound_name() -> None:
 
 
 def test_citation_keeps_author_when_not_named_inline() -> None:
-    bib = {"k1": BibEntry(key="k1", authors=["Jain", "Other"], year=2021)}
+    bib = {"k1": BibEntry(key="k1", authors=["Jain", "Smith", "Lee"], year=2021)}
     cites = {"5": Citation(marker="[5]", bib_key="k1")}
     out = resolve_citations("as shown previously [5]", cites, bib, "brief")
-    assert "Jain and colleagues twenty twenty-one" in out
+    assert "Jain and others twenty twenty-one" in out  # 3+ authors -> "and others"
 
 
 def test_collapse_is_idempotent_and_keeps_single_word() -> None:
@@ -95,10 +95,10 @@ def test_collapse_is_idempotent_and_keeps_single_word() -> None:
 
 def test_citation_keeps_author_whose_surname_is_a_common_word() -> None:
     # An author named Wall must not be dropped by the lowercase word "wall" before the marker.
-    bib = {"k": BibEntry(key="k", authors=["Wall", "Other"], year=2010)}
+    bib = {"k": BibEntry(key="k", authors=["Wall"], year=2010)}
     cites = {"12": Citation(marker="[12]", bib_key="k")}
     out = resolve_citations("ABA at the cell wall [12] during stress", cites, bib, "brief")
-    assert "Wall and colleagues twenty ten" in out
+    assert "Wall twenty ten" in out
 
 
 def test_url_ignores_filenames_and_preserves_punctuation() -> None:

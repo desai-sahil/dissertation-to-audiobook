@@ -35,14 +35,20 @@ class NotationRule(StrictModel):
     spoken: str  # e.g. "apoplastic subsidiary-cell water potential"
 
 
+class Dehyphenation(StrictModel):
+    broken: str  # word split by a PDF line break, e.g. "me-asurable"
+    fixed: str  # the intended word, e.g. "measurable"
+
+
 class PronunciationPlan(StrictModel):
     acronyms: list[AcronymRule] = []
     terms: list[TermRule] = []
     notation: list[NotationRule] = []
+    dehyphenations: list[Dehyphenation] = []
     notes: list[str] = []  # uncertain/flagged items, surfaced in out/<slug>.qa.md
 
     def is_empty(self) -> bool:
-        return not (self.acronyms or self.terms or self.notation)
+        return not (self.acronyms or self.terms or self.notation or self.dehyphenations)
 
 
 def build_curate_prompt(document_text: str) -> str:
@@ -54,12 +60,16 @@ def build_curate_prompt(document_text: str) -> str:
         '{"acronyms":[{"acronym":"ABA","first_use":"abscisic acid","short_form":"A B A"}],'
         '"terms":[{"term":"AtRBOHD","spoken":"arbo D"}],'
         '"notation":[{"written":"psi apo ssc","spoken":"apoplastic subsidiary-cell water '
-        'potential"}],"notes":["anything you were unsure about"]}\n\n'
+        'potential"}],"dehyphenations":[{"broken":"me-asurable","fixed":"measurable"}],'
+        '"notes":["anything you were unsure about"]}\n\n'
         "Rules:\n"
         "- acronyms: give the full first_use expansion and a short_form spoken as letters "
         '("A B A") unless a lab says it as a word (ROS -> "ross", SPAC -> "spack").\n'
         "- terms: gene/protein names a TTS voice would mispronounce.\n"
         '- notation: flattened math/symbols (e.g. "psi apo ssc") mapped to plain words.\n'
+        '- dehyphenations: words a PDF line break split with a stray hyphen ("me-asurable" '
+        '-> "measurable", "encom-pass" -> "encompass"). Only real broken words; keep genuine '
+        'compounds like "well-known".\n'
         "- Never change meaning. If unsure about a term, add a note and leave it out.\n\n"
         f"Document:\n{document_text}"
     )
@@ -102,6 +112,9 @@ def apply_plan(texts: list[str], plan: PronunciationPlan) -> list[str]:
     for term in plan.terms:
         if term.term.strip():
             plain.setdefault(term.term, term.spoken)
+    for fix in plan.dehyphenations:
+        if fix.broken.strip():
+            plain.setdefault(fix.broken, fix.fixed)
     acronyms: dict[str, AcronymRule] = {}
     for rule in plan.acronyms:
         if rule.acronym.strip() and rule.acronym not in plain:
