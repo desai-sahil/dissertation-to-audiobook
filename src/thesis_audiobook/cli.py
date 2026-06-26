@@ -214,6 +214,18 @@ def run(
         typer.echo(f"  note           : {estimate.note}")
         return
 
+    if use_real_llm and not os.environ.get("ANTHROPIC_API_KEY"):
+        typer.echo(
+            "error: --llm anthropic needs ANTHROPIC_API_KEY set in this shell "
+            "(used by the equation glosses and the pronunciation curator).",
+            err=True,
+        )
+        raise typer.Exit(code=2)
+    if use_real_tts and not (
+        os.environ.get("ELEVENLABS_API_KEY") or os.environ.get("ELEVEN_LABS_API_KEY")
+    ):
+        typer.echo("error: --tts elevenlabs needs ELEVENLABS_API_KEY set in this shell.", err=True)
+        raise typer.Exit(code=2)
     if use_real_tts and config.profile.voice_id in (None, "", "mock-voice"):
         typer.echo(
             "error: --tts elevenlabs needs a real voice; pass --voice <id> or set "
