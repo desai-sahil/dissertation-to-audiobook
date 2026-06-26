@@ -15,6 +15,7 @@ from thesis_audiobook.adapters.elevenlabs_tts import ElevenLabsClient, ElevenLab
 from thesis_audiobook.adapters.ffmpeg_muxer import FfmpegMuxer
 from thesis_audiobook.adapters.file_cache import FileCache
 from thesis_audiobook.adapters.grobid_client import GrobidClient
+from thesis_audiobook.adapters.markdown_parser import MarkdownFileParser
 from thesis_audiobook.adapters.marker_parser import MarkerParser
 from thesis_audiobook.adapters.mineru_parser import MinerUParser
 from thesis_audiobook.adapters.mocks import (
@@ -76,9 +77,14 @@ def build_mock_context(
 def select_parser_adapters(config: Config) -> tuple[PdfParser, BibParser]:
     """Pick the real parser + bibliography adapters for the configured backend.
 
-    Poppler is fully local; Marker/MinerU pair with GROBID for citation linkage.
-    LLM and TTS stay mocked in M2 (they land in M3 and M4).
+    Poppler is fully local; Marker/MinerU pair with GROBID for citation linkage. The
+    "markdown" backend ingests a pre-parsed markdown file (from a standalone Marker run),
+    with no separate bibliography source. LLM and TTS are wired separately.
     """
+    if config.parser_backend == "markdown":
+        if not config.markdown_path:
+            raise ValueError("parser_backend 'markdown' requires config.markdown_path")
+        return MarkdownFileParser(config.markdown_path), MockBibParser()
     if config.parser_backend == "poppler":
         return PopplerParser(), PopplerBibParser()
     if config.parser_backend == "mineru":

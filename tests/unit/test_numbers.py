@@ -6,8 +6,23 @@ from thesis_audiobook.normalization.numbers import (
     int_to_words,
     normalize_numbers,
     number_to_words,
+    section_to_words,
     year_to_words,
 )
+
+
+@pytest.mark.parametrize(
+    "section,spoken",
+    [
+        ("6.1", "six point one"),  # matches the old single-dot behavior
+        ("2.3.1", "two point three point one"),  # three-level: used to crash number_to_words
+        ("6.10", "six point ten"),  # components read as integers, not digits
+        ("4", "four"),
+        (".", "."),  # degenerate heading does not raise
+    ],
+)
+def test_section_to_words(section: str, spoken: str) -> None:
+    assert section_to_words(section) == spoken
 
 
 @pytest.mark.parametrize(

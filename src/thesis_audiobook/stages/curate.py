@@ -13,6 +13,8 @@ import hashlib
 
 from thesis_audiobook.context import Context
 from thesis_audiobook.curate import (
+    CURATOR_MAX_TOKENS,
+    CURATOR_SYSTEM,
     CURATOR_VERSION,
     PronunciationPlan,
     apply_plan,
@@ -56,7 +58,13 @@ class CurateStage:
         cached = ctx.cache.get(key)
         if cached is not None:
             return parse_plan(cached.decode("utf-8"))
-        plan = parse_plan(ctx.llm.complete(build_curate_prompt(document_text)))
+        plan = parse_plan(
+            ctx.llm.complete(
+                build_curate_prompt(document_text),
+                system=CURATOR_SYSTEM,
+                max_tokens=CURATOR_MAX_TOKENS,
+            )
+        )
         # Never cache an empty plan (mock output or a parse failure): leave it to retry.
         if not plan.is_empty():
             ctx.cache.put(key, plan.model_dump_json().encode("utf-8"))

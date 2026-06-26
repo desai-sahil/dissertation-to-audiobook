@@ -17,11 +17,12 @@ from thesis_audiobook.adapters.anthropic_llm import AnthropicUnavailableError
 from thesis_audiobook.adapters.elevenlabs_tts import ElevenLabsUnavailableError
 from thesis_audiobook.adapters.ffmpeg_muxer import FfmpegUnavailableError
 from thesis_audiobook.bootstrap import build_context
+from thesis_audiobook.cartographer import render_structure_md
 from thesis_audiobook.chunking import preview_chunks
 from thesis_audiobook.config import Config, OutputMode, ParserBackend, profile_for
 from thesis_audiobook.cost import estimate_cost
 from thesis_audiobook.curate import PronunciationPlan
-from thesis_audiobook.ir import Chunk, Document, DocumentMeta
+from thesis_audiobook.ir import Chunk, Document, DocumentMeta, StructureMap
 from thesis_audiobook.linkage import citation_linkage
 from thesis_audiobook.stages import build_default_pipeline
 from thesis_audiobook.stages.assemble_audio import slugify
@@ -32,7 +33,11 @@ app = typer.Typer(
 )
 
 
-_PARSER_HELP = "Parser backend: poppler (offline), marker, or mineru."
+_PARSER_HELP = "Parser backend: poppler (offline), marker, mineru, or markdown (pre-parsed file)."
+_MARKDOWN_HELP = (
+    "Ingest a pre-parsed markdown file (from a standalone Marker/MinerU run) as the source, "
+    "instead of parsing the PDF here. Sets --parser markdown. Best structure for complex theses."
+)
 _LLM_HELP = (
     "Gloss/summary backend: mock (offline, free) or anthropic "
     "(real LLM via ANTHROPIC_API_KEY, costs money)."
@@ -52,8 +57,11 @@ _COVER_HELP = (
 
 
 def _validate_parser(name: str) -> ParserBackend:
-    if name not in ("marker", "mineru", "poppler"):
-        typer.echo(f"error: unknown parser {name!r}; choose poppler, marker, or mineru", err=True)
+    if name not in ("marker", "mineru", "poppler", "markdown"):
+        typer.echo(
+            f"error: unknown parser {name!r}; choose poppler, marker, mineru, or markdown",
+            err=True,
+        )
         raise typer.Exit(code=2)
     return name
 
@@ -122,6 +130,20 @@ def _resolve_cover(cover: Path | None) -> tuple[bytes | None, str]:
     return None, f"none (no {_DEFAULT_COVER})"
 
 
+def _write_structure_md(
+    out: Path, doc: Document, structure_map: StructureMap | None, *, include_appendices: bool
+) -> Path:
+    """Write the cartographer's structure map for the pre-spend review (Gate A artifact)."""
+    path = out / f"{slugify(doc.meta.title)}.structure.md"
+    path.write_text(
+        render_structure_md(
+            structure_map or StructureMap(), doc, include_appendices=include_appendices
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
 def _format_qa(plan: PronunciationPlan | None) -> str:
     """Render the curator's plan as a human-readable transparency report."""
     lines = ["# Pronunciation QA (LLM curator)", ""]
@@ -168,6 +190,7 @@ def run(
         str, typer.Option(help="Listener profile: committee or general.")
     ] = "committee",
     parser: Annotated[str, typer.Option("--parser", help=_PARSER_HELP)] = "poppler",
+    markdown: Annotated[Path | None, typer.Option("--markdown", help=_MARKDOWN_HELP)] = None,
     llm: Annotated[str, typer.Option("--llm", help=_LLM_HELP)] = "mock",
     tts: Annotated[str, typer.Option("--tts", help=_TTS_HELP)] = "mock",
     audio_format: Annotated[str, typer.Option("--format", help=_FORMAT_HELP)] = "m4b",
@@ -178,6 +201,13 @@ def run(
     ] = None,
     no_curate: Annotated[
         bool, typer.Option("--no-curate", help="Skip the LLM pronunciation curator.")
+    ] = False,
+    no_structure_eval: Annotated[
+        bool,
+        typer.Option(
+            "--no-structure-eval",
+            help="Skip the LLM thesis cartographer (front/back matter + appendix detection).",
+        ),
     ] = False,
     seed: Annotated[int, typer.Option(help="Determinism seed.")] = 0,
     out: Annotated[Path, typer.Option(help="Output directory.")] = Path("out"),
@@ -206,7 +236,15 @@ def run(
         parser_backend=_validate_parser(parser),
         output_mode=_validate_format(audio_format),
         curate=not no_curate,
+        structure_eval=not no_structure_eval,
     )
+    if markdown is not None:
+        if not markdown.exists():
+            typer.echo(f"error: markdown file not found: {markdown}", err=True)
+            raise typer.Exit(code=2)
+        # Ingest the pre-parsed markdown instead of parsing the PDF here.
+        config.parser_backend = "markdown"
+        config.markdown_path = str(markdown)
     if preview:
         # A preview renders with the cheap flash model, not the deliverable model.
         config.profile.model_id = config.profile.preview_model_id
@@ -230,12 +268,16 @@ def run(
         # Stop before lexicon/tts/assemble, so no publish or render ever happens.
         doc = pipeline.run(seed_doc, ctx, to="assemble_script")
         _write_review_artifacts(out, doc)
+        structure_path = _write_structure_md(
+            out, doc, ctx.structure_map, include_appendices=config.profile.include_appendices
+        )
         estimate = estimate_cost(doc.script or "", config.usd_per_character)
         typer.echo("Thesis-to-Audiobook  --dry-run (no external calls)")
         typer.echo(f"  title          : {doc.meta.title}")
         typer.echo(f"  profile        : {config.profile.name}")
         typer.echo(f"  script chars   : {estimate.characters}")
         typer.echo(f"  chunk plan     : {_chunk_plan_summary(doc.chunks, config.chunk_char_limit)}")
+        typer.echo(f"  structure map  : {structure_path}")
         typer.echo(f"  rate USD/char  : {estimate.usd_per_character}")
         typer.echo(f"  estimated USD  : {estimate.estimated_usd}")
         typer.echo(f"  note           : {estimate.note}")
@@ -281,6 +323,9 @@ def run(
 
     slug = slugify(doc.meta.title)
     script_path, chunks_path = _write_review_artifacts(out, doc)
+    structure_path = _write_structure_md(
+        out, doc, ctx.structure_map, include_appendices=config.profile.include_appendices
+    )
     audio_paths: list[Path] = []
     for blob in ctx.audio_outputs:
         path = out / blob.filename
@@ -306,6 +351,7 @@ def run(
     typer.echo(f"  chunks            : {len(doc.chunks)}")
     typer.echo(f"  script chars      : {estimate.characters}")
     typer.echo(f"  reviewable script : {script_path}  (Gate B artifact)")
+    typer.echo(f"  structure map     : {structure_path}  (Gate A artifact)")
     typer.echo(f"  chunk plan        : {chunks_path}")
     typer.echo(f"  {audio_label:<18}: {audio_list} ({total_bytes} bytes)")
     typer.echo(f"  cover             : {cover_note}")

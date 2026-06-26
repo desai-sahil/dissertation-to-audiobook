@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 
 from thesis_audiobook.config import Config
 from thesis_audiobook.curate import PronunciationPlan
+from thesis_audiobook.ir import StructureMap
 from thesis_audiobook.lexicon import DEFAULT_LEXICON, Lexicon
 from thesis_audiobook.log import StructuredLogger
 from thesis_audiobook.ports.audio import AudioMuxer, NamedBlob
@@ -63,6 +64,7 @@ class Context:
     # Run-scoped state.
     pdf_bytes: bytes = b""
     cover_image: bytes | None = None
+    structure_map: StructureMap | None = None
     pronunciation_plan: PronunciationPlan | None = None
     dictionary_locators: list[DictionaryLocator] = field(default_factory=_new_locators)
     rendered: dict[str, bytes] = field(default_factory=_new_byte_map)

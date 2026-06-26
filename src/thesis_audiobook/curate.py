@@ -17,6 +17,13 @@ import re
 from thesis_audiobook.ir import StrictModel
 
 CURATOR_VERSION = "curate-v1"
+CURATOR_SYSTEM = (
+    "You produce a pronunciation plan for an audiobook. Decide only HOW terms are said, "
+    "never WHAT is said. Return ONLY the JSON object requested - no prose, no markdown fences."
+)
+# A whole-thesis plan (many acronyms/terms/notation) overflows a gloss-sized cap; output is
+# billed per actual token, so a generous cap is free unless used.
+CURATOR_MAX_TOKENS = 16_384
 
 
 class AcronymRule(StrictModel):

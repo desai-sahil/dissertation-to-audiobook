@@ -49,9 +49,13 @@ class MockLlm:
     plus identical prompt yields byte-identical spoken output.
     """
 
-    def complete(self, prompt: str) -> str:
+    def complete(
+        self, prompt: str, *, system: str | None = None, max_tokens: int | None = None
+    ) -> str:
         # Letters-only token: deterministic per prompt, and free of digits/notation so
-        # it survives the normalizer unchanged (like a real, clean gloss would).
+        # it survives the normalizer unchanged (like a real, clean gloss would). The
+        # system/max_tokens overrides are ignored: the canned reply is never valid JSON,
+        # so the structured stages parse it to an empty result and no-op offline.
         digest = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
         token = "".join(c for c in digest if c.isalpha())[:8]
         return f"a mock gloss for input {token}"

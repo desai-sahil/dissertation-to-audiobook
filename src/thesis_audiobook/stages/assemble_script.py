@@ -17,7 +17,7 @@ from thesis_audiobook.context import Context
 from thesis_audiobook.ir import Block, BlockType, Document, DocumentMeta
 from thesis_audiobook.lexicon import Lexicon
 from thesis_audiobook.normalization import normalize_all
-from thesis_audiobook.normalization.numbers import int_to_words, number_to_words
+from thesis_audiobook.normalization.numbers import int_to_words, section_to_words
 
 _BREAK = '<break time="0.8s"/>'
 _GAP = "\n\n"
@@ -31,7 +31,7 @@ def model_supports_breaks(model_id: str) -> bool:
 def _heading_announcement(block: Block) -> str:
     title = block.current_text()
     if block.section:
-        return f"Section {number_to_words(block.section)}, {title}."
+        return f"Section {section_to_words(block.section)}, {title}."
     if block.chapter is not None:
         return f"Chapter {int_to_words(block.chapter)}. {title}."
     return f"{title}."

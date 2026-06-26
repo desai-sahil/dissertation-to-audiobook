@@ -14,7 +14,9 @@ class FakeCiteLlm:
         self.json_out = json_out
         self.calls = 0
 
-    def complete(self, prompt: str) -> str:
+    def complete(
+        self, prompt: str, *, system: str | None = None, max_tokens: int | None = None
+    ) -> str:
         self.calls += 1
         return self.json_out
 

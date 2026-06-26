@@ -16,7 +16,7 @@ from pydantic import Field
 
 from thesis_audiobook.ir import StrictModel
 
-ParserBackend = Literal["marker", "mineru", "poppler"]
+ParserBackend = Literal["marker", "mineru", "poppler", "markdown"]
 # m4b and mp4 are the same MPEG-4/AAC container (chaptered single file); mp3 is one
 # file per chapter. m4b signals "audiobook" to Apple Books; mp4 plays everywhere.
 OutputMode = Literal["m4b", "mp4", "mp3"]
@@ -103,6 +103,9 @@ class Config(StrictModel):
     chunk_char_limit: int = 2000
     # LLM pronunciation curator (per-document). On by default; --no-curate disables it.
     curate: bool = True
+    # LLM thesis cartographer (structure map: include/skip regions). On by default;
+    # --no-structure-eval disables it (then the build_ir heuristics stand alone).
+    structure_eval: bool = True
     # Audio assembly: a single M4B with chapter markers, or flat per-chapter MP3s.
     output_mode: OutputMode = "m4b"
     narrator: str = "Audiobook narrator"
@@ -111,4 +114,7 @@ class Config(StrictModel):
     # Parsing backend. Marker is the spec's primary parser; MinerU is the
     # equation-heavy alternative; poppler is the pure-Python offline fallback.
     parser_backend: ParserBackend = "marker"
+    # Path to a pre-parsed markdown file, used when parser_backend == "markdown" (run a
+    # standalone Marker/MinerU to produce it; see adapters/markdown_parser.py).
+    markdown_path: str | None = None
     grobid_url: str = "http://localhost:8070"

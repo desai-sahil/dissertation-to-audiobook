@@ -34,6 +34,47 @@ class Handling(StrEnum):
     announce = "announce"
 
 
+class RegionKind(StrEnum):
+    """The thesis-agnostic taxonomy the cartographer classifies regions into.
+
+    Independent of BlockType: a RegionKind is a *semantic* label for a run of blocks
+    (e.g. "this span is the abstract"); the cartographer maps each kind to a BlockType
+    deterministically so the existing select stage decides keep/handling unchanged.
+    """
+
+    title_page = "title_page"
+    copyright_page = "copyright_page"
+    abstract = "abstract"
+    biographical_sketch = "biographical_sketch"
+    dedication = "dedication"
+    epigraph = "epigraph"
+    acknowledgments = "acknowledgments"
+    preface_or_foreword = "preface_or_foreword"
+    table_of_contents = "table_of_contents"
+    list_of_tables = "list_of_tables"
+    list_of_figures = "list_of_figures"
+    list_of_abbreviations = "list_of_abbreviations"
+    chapter_body = "chapter_body"
+    chapter_front_note = "chapter_front_note"
+    chapter_abstract = "chapter_abstract"
+    per_chapter_bibliography = "per_chapter_bibliography"
+    bibliography = "bibliography"
+    appendix = "appendix"
+    appendix_bibliography = "appendix_bibliography"
+    supplementary_information = "supplementary_information"
+    glossary = "glossary"
+    index_section = "index"
+    colophon_or_vita = "colophon_or_vita"
+    footnotes = "footnotes"
+    unknown = "unknown"
+
+
+class RegionDecision(StrEnum):
+    include = "include"
+    skip = "skip"
+    review = "review"
+
+
 class StrictModel(BaseModel):
     """Base model that forbids extra fields so malformed transforms fail fast."""
 
@@ -102,6 +143,38 @@ class Chunk(StrictModel):
     block_ids: list[str] = []
     prev_id: str | None = None
     next_id: str | None = None
+
+
+class Region(StrictModel):
+    """One classified span of the document. Every field is a label, an enum, a
+    confidence, or a back-pointer to an EXISTING block id. There is no free-text field
+    that is ever spoken: `label`/`rationale` appear only in the structure.md artifact.
+    This is the claim-safety boundary - the cartographer cannot inject audio.
+    """
+
+    kind: RegionKind
+    decision: RegionDecision
+    first_block_id: str
+    last_block_id: str
+    chapter: int | None = None
+    label: str = ""
+    heading_anchored: bool = False
+    kind_confidence: float = 0.0
+    decision_confidence: float = 0.0
+    rationale: str = ""
+    duplicate_of: str | None = None
+    language: str | None = None
+
+
+class StructureMap(StrictModel):
+    # Dissertation title/author the cartographer read from the title-page region. Applied
+    # to DocumentMeta only if found verbatim in the document (no fabrication).
+    title: str | None = None
+    author: str | None = None
+    regions: list[Region] = []
+
+    def is_empty(self) -> bool:
+        return not self.regions and self.title is None and self.author is None
 
 
 class DocumentMeta(StrictModel):

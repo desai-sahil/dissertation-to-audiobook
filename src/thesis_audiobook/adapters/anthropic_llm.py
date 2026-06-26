@@ -61,11 +61,15 @@ class AnthropicClient:
         # request/response mapping without networking; production leaves it None.
         self._injected = client
 
-    def complete(self, prompt: str) -> str:
+    def complete(
+        self, prompt: str, *, system: str | None = None, max_tokens: int | None = None
+    ) -> str:
+        # Per-call overrides let the structured stages (cartographer/curate) use a JSON
+        # system and a large token budget while glosses keep the short defaults.
         message = self._client().messages.create(
             model=self._model,
-            max_tokens=self._max_tokens,
-            system=self._system,
+            max_tokens=max_tokens or self._max_tokens,
+            system=system or self._system,
             messages=[{"role": "user", "content": prompt}],
         )
         return extract_text(message.content)

@@ -27,7 +27,9 @@ class FakePlanLlm:
         self.plan_json = plan_json
         self.calls = 0
 
-    def complete(self, prompt: str) -> str:
+    def complete(
+        self, prompt: str, *, system: str | None = None, max_tokens: int | None = None
+    ) -> str:
         self.calls += 1
         return self.plan_json
 

@@ -14,6 +14,12 @@ out/
 dist/
 build/
 .cache/
+marker_out/
+
+# Large local inputs not committed (the small sample/Chapter6_preview.pdf IS tracked).
+# Full theses are big binaries; keep them local.
+sample/Jain_cornellgrad_0058F_13867.pdf
+sample/*.full.pdf
 
 # Secrets (never commit API keys; they come from the environment)
 .env

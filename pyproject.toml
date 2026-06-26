@@ -8,6 +8,12 @@ dependencies = [
     "typer>=0.9",
 ]
 
+# NOTE: marker-pdf is NOT a dependency (not even optional). marker-pdf hard-pins
+# anthropic<0.47, which conflicts irreconcilably with the anthropic>=0.112 this project
+# needs for Claude. Run Marker as a STANDALONE tool in its own environment to produce a
+# markdown file, then feed it in with `audiobook run ... --parser markdown --markdown FILE`
+# (the in-process MarkerParser adapter remains for environments without that conflict).
+
 [project.scripts]
 audiobook = "thesis_audiobook.cli:main"
 

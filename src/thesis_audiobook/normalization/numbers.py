@@ -84,6 +84,23 @@ def number_to_words(token: str) -> str:
     return f"{sign}{spoken}".strip()
 
 
+def section_to_words(section: str) -> str:
+    """Speak a hierarchical section number like '2.3.1' as 'two point three point one'.
+
+    Each dot-separated component is read as an integer ('6.10' -> 'six point ten'), not as
+    digits. Non-numeric or empty components are skipped/passed through so a messy heading
+    never raises (number_to_words crashes on multi-dot section numbers; this does not).
+    """
+    words: list[str] = []
+    for part in section.split("."):
+        part = part.strip()
+        if part.isdigit():
+            words.append(int_to_words(int(part)))
+        elif part:
+            words.append(part)
+    return " point ".join(words) if words else section.strip()
+
+
 def _spell_exponent(exp: str) -> str:
     if exp == "2":
         return " squared"

@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from thesis_audiobook.pipeline import Pipeline, Stage
+from thesis_audiobook.stages.appendix_signpost import AppendixSignpostStage
 from thesis_audiobook.stages.assemble_audio import AssembleAudioStage
 from thesis_audiobook.stages.assemble_script import AssembleScriptStage
 from thesis_audiobook.stages.build_ir import BuildIrStage
+from thesis_audiobook.stages.cartographer import CartographerStage
 from thesis_audiobook.stages.citations import CitationsStage
 from thesis_audiobook.stages.curate import CurateStage
 from thesis_audiobook.stages.figures import FiguresStage
@@ -21,12 +23,14 @@ def default_stages() -> list[Stage]:
     return [
         IngestStage(),
         BuildIrStage(),
+        CartographerStage(),
         SelectStage(),
         CurateStage(),
         MathStage(),
         FiguresStage(),
         CitationsStage(),
         NormalizeStage(),
+        AppendixSignpostStage(),
         AssembleScriptStage(),
         LexiconStage(),
         TtsStage(),

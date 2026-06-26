@@ -6,9 +6,11 @@ error is raised if it is invoked without being available. The markdown-to-IR ste
 pure function (markdown_ir.markdown_to_document), unit-tested offline; this adapter
 only runs under the live integration test.
 """
-# The marker-pdf package is optional and untyped; its symbols are unknown to pyright.
-# pyright: reportMissingImports=false, reportUnknownVariableType=false
-# pyright: reportUnknownMemberType=false
+# The marker-pdf package is optional and untyped; its symbols are unknown to pyright
+# whether or not it is installed, so suppress the untyped-import diagnostics here.
+# pyright: reportMissingImports=false, reportMissingTypeStubs=false
+# pyright: reportUnknownVariableType=false, reportUnknownMemberType=false
+# pyright: reportUnknownArgumentType=false
 
 from __future__ import annotations
 
