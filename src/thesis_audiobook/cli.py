@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -20,8 +21,18 @@ from thesis_audiobook.bootstrap import build_context
 from thesis_audiobook.cartographer import render_structure_md
 from thesis_audiobook.chunking import preview_chunks
 from thesis_audiobook.config import Config, OutputMode, ParserBackend, profile_for
+from thesis_audiobook.context import Context
 from thesis_audiobook.cost import estimate_cost
 from thesis_audiobook.curate import PronunciationPlan
+from thesis_audiobook.extraction_qc import (
+    EXTRACTION_QC_MAX_TOKENS,
+    EXTRACTION_QC_SYSTEM,
+    EXTRACTION_QC_VERSION,
+    ExtractionQCReport,
+    build_qc_prompt,
+    parse_qc,
+    render_qc_md,
+)
 from thesis_audiobook.ir import Chunk, Document, DocumentMeta, StructureMap
 from thesis_audiobook.linkage import citation_linkage
 from thesis_audiobook.stages import build_default_pipeline
@@ -405,6 +416,69 @@ def parse(
     )
     typer.echo("  Gate A warnings:")
     typer.echo(ctx.warnings.report())
+
+
+def _run_extraction_qc(markdown: str, ctx: Context) -> ExtractionQCReport:
+    """One cached LLM audit of the markdown. Keyed by version + backend + markdown digest, so
+    a re-run is free and a mock (empty) result is never cached over a real one."""
+    digest = hashlib.sha256(markdown.encode("utf-8")).hexdigest()
+    payload = f"{EXTRACTION_QC_VERSION}\n{type(ctx.llm).__name__}\n{digest}"
+    key = "extqc." + hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    cached = ctx.cache.get(key)
+    if cached is not None:
+        return parse_qc(cached.decode("utf-8"))
+    report = parse_qc(
+        ctx.llm.complete(
+            build_qc_prompt(markdown),
+            system=EXTRACTION_QC_SYSTEM,
+            max_tokens=EXTRACTION_QC_MAX_TOKENS,
+        )
+    )
+    if not report.is_empty():
+        ctx.cache.put(key, report.model_dump_json().encode("utf-8"))
+    return report
+
+
+@app.command(name="check-extraction")
+def check_extraction(
+    markdown: Annotated[Path, typer.Argument(help="Markdown file from a standalone Marker run.")],
+    llm: Annotated[
+        str, typer.Option("--llm", help="mock (offline, no audit) or anthropic (real Opus audit).")
+    ] = "anthropic",
+    out: Annotated[Path, typer.Option(help="Output directory.")] = Path("out"),
+    cache_dir: Annotated[Path, typer.Option(help="Cache directory.")] = Path(".cache/tts"),
+) -> None:
+    """LLM oversight of the extraction: audit a Marker markdown for extraction defects.
+
+    Opus reads the markdown and flags OCR garble, broken/dropped equations, merged or
+    truncated blocks, missing/misordered sections, and mangled tables/figures - BEFORE the
+    document goes downstream. It only reports (with verbatim anchors); it never rewrites the
+    text. Writes out/<name>.extraction-qc.md. One cached call, so a re-run is free.
+    """
+    if not markdown.exists():
+        typer.echo(f"error: markdown file not found: {markdown}", err=True)
+        raise typer.Exit(code=2)
+    use_real_llm = _validate_llm(llm)
+    if use_real_llm and not os.environ.get("ANTHROPIC_API_KEY"):
+        typer.echo("error: --llm anthropic needs ANTHROPIC_API_KEY set in this shell.", err=True)
+        raise typer.Exit(code=2)
+
+    config = Config(cache_dir=str(cache_dir))
+    ctx = build_context(config, pdf_bytes=b"", log_enabled=False, use_real_llm=use_real_llm)
+    report = _run_extraction_qc(markdown.read_text(encoding="utf-8"), ctx)
+
+    out.mkdir(parents=True, exist_ok=True)
+    report_path = out / f"{markdown.stem}.extraction-qc.md"
+    report_path.write_text(render_qc_md(report), encoding="utf-8")
+
+    high = sum(1 for i in report.issues if i.severity == "high")
+    typer.echo("Extraction QC  (LLM oversight of the Marker extraction)")
+    typer.echo(f"  markdown : {markdown}")
+    typer.echo(f"  backend  : {'anthropic (real)' if use_real_llm else 'mock'}")
+    typer.echo(f"  issues   : {len(report.issues)} ({high} high severity)")
+    typer.echo(f"  report   : {report_path}")
+    if not use_real_llm:
+        typer.echo("  (mock LLM did no real audit; pass --llm anthropic for the Opus review)")
 
 
 def _use_run(verb: str) -> None:
