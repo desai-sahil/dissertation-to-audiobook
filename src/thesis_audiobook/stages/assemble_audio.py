@@ -80,7 +80,7 @@ class AssembleAudioStage:
 
     def run(self, doc: Document, ctx: Context) -> Document:
         plan = build_audiobook_plan(doc, ctx)
-        result = ctx.muxer.mux(plan, ctx.rendered)
+        result = ctx.muxer.mux(plan, ctx.rendered, cover=ctx.cover_image)
 
         ctx.audio_outputs = result.outputs
         ctx.chapter_count = result.chapter_count

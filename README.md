@@ -56,13 +56,16 @@ export ELEVENLABS_API_KEY=...
 export ELEVENLABS_VOICE_ID=...      # a real voice id (or pass --voice)
 
 uv run audiobook run sample/Chapter6_preview.pdf \
-  --parser poppler --llm anthropic --tts elevenlabs --format mp4
+  --parser poppler --llm anthropic --tts elevenlabs --format mp4 --cover cover/cover01.png
 open out/conclusions-and-future-work.mp4
 ```
 
-Outputs land in `out/`: the audio (`.m4b`/`.mp4`/per-chapter `.mp3`), the Gate B
+Outputs land in `out/`: the chaptered audio (`.m4b` or `.mp4`) **plus** a single
+whole-book `.mp3` alongside it (`--format mp3` emits only that one file), the Gate B
 `.script.md`, the `.chunks.json` plan, a `.provenance.json` sidecar (audio timestamp ->
-source block id), and `.qa.md` (what the curator decided + anything it flagged).
+source block id), and `.qa.md` (what the curator decided + anything it flagged). If a
+cover image is given, the `.mp4` shows it for the whole runtime and the `.m4b`/`.mp3`
+embed it as album art; with no cover the renders are audio-only.
 
 ### `run` options
 
@@ -71,7 +74,8 @@ source block id), and `.qa.md` (what the curator decided + anything it flagged).
 | `--parser poppler\|marker\|mineru` | PDF parser (poppler is offline; marker is highest fidelity) |
 | `--llm mock\|anthropic` | equation glosses + pronunciation curator (anthropic costs money) |
 | `--tts mock\|elevenlabs` | speech synthesis (elevenlabs costs money; needs ffmpeg) |
-| `--format m4b\|mp4\|mp3` | one chaptered file (m4b/mp4) or one MP3 per chapter |
+| `--format m4b\|mp4\|mp3` | chaptered file (m4b/mp4) + a whole-book mp3; `mp3` emits only the mp3 |
+| `--cover <path>` | cover image (default `cover/cover01.png`); mp4 shows it, m4b/mp3 embed it; omit to skip |
 | `--voice <id>` | ElevenLabs voice id (or set `ELEVENLABS_VOICE_ID`) |
 | `--profile committee\|general` | listener profile (see below) |
 | `--preview` | render the first chapter only, with the cheap flash model |

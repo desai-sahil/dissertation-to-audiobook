@@ -52,4 +52,6 @@ class MuxResult:
 
 
 class AudioMuxer(Protocol):
-    def mux(self, plan: AudiobookPlan, audio: dict[str, bytes]) -> MuxResult: ...
+    def mux(
+        self, plan: AudiobookPlan, audio: dict[str, bytes], cover: bytes | None = None
+    ) -> MuxResult: ...

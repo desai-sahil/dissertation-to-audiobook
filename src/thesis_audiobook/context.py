@@ -62,6 +62,7 @@ class Context:
     pronunciation_lexicon: PronunciationLexicon = field(default_factory=_empty_pronunciation)
     # Run-scoped state.
     pdf_bytes: bytes = b""
+    cover_image: bytes | None = None
     pronunciation_plan: PronunciationPlan | None = None
     dictionary_locators: list[DictionaryLocator] = field(default_factory=_new_locators)
     rendered: dict[str, bytes] = field(default_factory=_new_byte_map)

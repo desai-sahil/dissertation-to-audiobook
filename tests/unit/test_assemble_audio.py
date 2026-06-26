@@ -46,15 +46,17 @@ def test_plan_has_one_chapter_per_chapter_with_titles(tiny_ir_path: Path) -> Non
     assert plan.author == "A. Author"
 
 
-def test_assemble_emits_one_m4b_with_chapters_and_provenance(tiny_ir_path: Path) -> None:
+def test_assemble_emits_m4b_plus_whole_book_mp3_with_provenance(tiny_ir_path: Path) -> None:
     doc = _two_chapter_doc()
     ctx = _ctx(Config(), tiny_ir_path)
     TtsStage().run(doc, ctx)
     AssembleAudioStage().run(doc, ctx)
 
     assert ctx.chapter_count == 2
-    assert len(ctx.audio_outputs) == 1
-    assert ctx.audio_outputs[0].filename.endswith(".m4b")
+    # m4b mode: the chaptered .m4b plus a single whole-book .mp3 alongside.
+    assert [Path(blob.filename).suffix for blob in ctx.audio_outputs] == [".m4b", ".mp3"]
+    # The primary deliverable (final_audio) is the chaptered file, not the mp3.
+    assert ctx.final_audio == ctx.audio_outputs[0].data
 
     prov = ctx.provenance
     assert prov is not None
@@ -67,25 +69,51 @@ def test_assemble_emits_one_m4b_with_chapters_and_provenance(tiny_ir_path: Path)
     assert block_ids_at(prov, prov.segments[1].start_seconds + 0.0001) == ["b2"]
 
 
-def test_mp3_mode_emits_one_output_per_chapter(tiny_ir_path: Path) -> None:
+def test_mp3_mode_emits_single_whole_book_file(tiny_ir_path: Path) -> None:
     doc = _two_chapter_doc()
     ctx = _ctx(Config(output_mode="mp3"), tiny_ir_path)
     TtsStage().run(doc, ctx)
     AssembleAudioStage().run(doc, ctx)
 
-    assert len(ctx.audio_outputs) == 2
-    assert all(blob.filename.endswith(".mp3") for blob in ctx.audio_outputs)
+    # mp3 mode is the single whole-book file only (no chaptered container alongside).
+    assert len(ctx.audio_outputs) == 1
+    assert ctx.audio_outputs[0].filename.endswith(".mp3")
 
 
-def test_mp4_mode_emits_one_chaptered_file(tiny_ir_path: Path) -> None:
+def test_mp4_mode_emits_chaptered_mp4_plus_whole_book_mp3(tiny_ir_path: Path) -> None:
     doc = _two_chapter_doc()
     ctx = _ctx(Config(output_mode="mp4"), tiny_ir_path)
     TtsStage().run(doc, ctx)
     AssembleAudioStage().run(doc, ctx)
 
-    assert len(ctx.audio_outputs) == 1
-    assert ctx.audio_outputs[0].filename.endswith(".mp4")
+    assert [Path(blob.filename).suffix for blob in ctx.audio_outputs] == [".mp4", ".mp3"]
     assert ctx.chapter_count == 2
+
+
+def test_assemble_passes_cover_image_through_to_muxer(tiny_ir_path: Path) -> None:
+    # The stage must forward ctx.cover_image to the muxer port; a spy captures it.
+    doc = _two_chapter_doc()
+    ctx = _ctx(Config(output_mode="mp4"), tiny_ir_path)
+    TtsStage().run(doc, ctx)
+    ctx.cover_image = b"\x89PNG fake-cover-bytes"
+
+    captured: dict[str, bytes | None] = {}
+    real_muxer = ctx.muxer
+
+    class SpyMuxer:
+        def mux(
+            self,
+            plan: object,
+            audio: dict[str, bytes],
+            cover: bytes | None = None,
+        ) -> object:
+            captured["cover"] = cover
+            return real_muxer.mux(plan, audio, cover=cover)  # type: ignore[arg-type]
+
+    ctx.muxer = SpyMuxer()  # type: ignore[assignment]
+    AssembleAudioStage().run(doc, ctx)
+
+    assert captured["cover"] == b"\x89PNG fake-cover-bytes"
 
 
 def test_real_script_front_matter_folds_into_chapters_no_spurious_markers(

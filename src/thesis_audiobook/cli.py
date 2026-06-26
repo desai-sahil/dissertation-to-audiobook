@@ -42,8 +42,12 @@ _TTS_HELP = (
     "(real render + pronunciation publish + ffmpeg mux; needs the key and ffmpeg, costs money)."
 )
 _FORMAT_HELP = (
-    "Audio output: m4b or mp4 (one chaptered file; mp4 plays everywhere) "
-    "or mp3 (one file per chapter)."
+    "Audio output: m4b or mp4 (one chaptered file; mp4 plays everywhere). "
+    "A single whole-book mp3 is always emitted alongside; mp3 mode emits only that."
+)
+_COVER_HELP = (
+    "Cover image (PNG/JPEG). The mp4 shows it for the whole runtime; the m4b/mp3 embed "
+    "it as album art. Defaults to cover/cover01.png; omit the file to render audio-only."
 )
 
 
@@ -99,6 +103,25 @@ def _write_review_artifacts(out: Path, doc: Document) -> tuple[Path, Path]:
     return script_path, chunks_path
 
 
+_DEFAULT_COVER = Path("cover/cover01.png")
+
+
+def _resolve_cover(cover: Path | None) -> tuple[bytes | None, str]:
+    """Resolve the cover image to embed, or (None, reason) to render audio-only.
+
+    A missing default cover is silent (the user opted out by not adding one); a missing
+    *explicitly named* cover is a likely typo, so we warn but still render audio-only
+    rather than abort a long render.
+    """
+    path = cover if cover is not None else _DEFAULT_COVER
+    if path.exists():
+        return path.read_bytes(), str(path)
+    if cover is not None:
+        typer.echo(f"warning: cover not found: {path}; rendering without cover art", err=True)
+        return None, "none (file not found)"
+    return None, f"none (no {_DEFAULT_COVER})"
+
+
 def _format_qa(plan: PronunciationPlan | None) -> str:
     """Render the curator's plan as a human-readable transparency report."""
     lines = ["# Pronunciation QA (LLM curator)", ""]
@@ -148,6 +171,7 @@ def run(
     llm: Annotated[str, typer.Option("--llm", help=_LLM_HELP)] = "mock",
     tts: Annotated[str, typer.Option("--tts", help=_TTS_HELP)] = "mock",
     audio_format: Annotated[str, typer.Option("--format", help=_FORMAT_HELP)] = "m4b",
+    cover: Annotated[Path | None, typer.Option("--cover", help=_COVER_HELP)] = None,
     voice: Annotated[
         str | None,
         typer.Option("--voice", help="ElevenLabs voice id (required for --tts elevenlabs)."),
@@ -237,6 +261,9 @@ def run(
         )
         raise typer.Exit(code=2)
 
+    cover_bytes, cover_note = _resolve_cover(cover)
+    ctx.cover_image = cover_bytes
+
     try:
         if preview:
             doc = pipeline.run(seed_doc, ctx, to="lexicon")
@@ -281,6 +308,7 @@ def run(
     typer.echo(f"  reviewable script : {script_path}  (Gate B artifact)")
     typer.echo(f"  chunk plan        : {chunks_path}")
     typer.echo(f"  {audio_label:<18}: {audio_list} ({total_bytes} bytes)")
+    typer.echo(f"  cover             : {cover_note}")
     typer.echo(f"  provenance        : {provenance_path}")
     typer.echo(f"  pronunciation qa  : {qa_path}")
     typer.echo("  Gate A warnings:")

@@ -79,36 +79,26 @@ class MockPronunciation:
 
 
 class MockMuxer:
-    """Pure stand-in muxer: no ffmpeg. Times chunks via wav_duration and concatenates
-    their WAV bytes into a deterministic placeholder file (one M4B, or one MP3 per
-    chapter). Not a real MP4 container; the real one is built by FfmpegMuxer on a
-    machine with ffmpeg. This is what keeps the whole pipeline runnable offline.
+    """Pure stand-in muxer: no ffmpeg. Times chunks via wav_duration and concatenates their
+    WAV bytes into deterministic placeholder files matching the real output SET: a chaptered
+    file (.mp4/.m4b) for those modes, plus a single whole-book .mp3 every render. Not real
+    containers and the cover is ignored here; FfmpegMuxer builds the real cover-video / album
+    art on a machine with ffmpeg. This keeps the whole pipeline runnable offline.
     """
 
-    def mux(self, plan: AudiobookPlan, audio: dict[str, bytes]) -> MuxResult:
-        ordered = [(ch, cid) for ch in plan.chapters for cid in ch.chunk_ids]
+    def mux(
+        self, plan: AudiobookPlan, audio: dict[str, bytes], cover: bytes | None = None
+    ) -> MuxResult:
+        ordered = [cid for chapter in plan.chapters for cid in chapter.chunk_ids]
         timings = [
-            ChunkTiming(
-                chunk_id=cid,
-                seconds=wav_duration(audio[cid]) if audio.get(cid) else 0.0,
-            )
-            for _, cid in ordered
+            ChunkTiming(chunk_id=cid, seconds=wav_duration(audio[cid]) if audio.get(cid) else 0.0)
+            for cid in ordered
         ]
-        if plan.output_mode == "mp3":
-            outputs = [
-                NamedBlob(
-                    filename=f"{plan.slug}.ch{ch.index:02d}.mp3",
-                    data=b"".join(audio.get(cid, b"") for cid in ch.chunk_ids),
-                )
-                for ch in plan.chapters
-            ]
-        else:
-            outputs = [
-                NamedBlob(
-                    filename=f"{plan.slug}.{plan.output_mode}",
-                    data=b"".join(audio.get(cid, b"") for _, cid in ordered),
-                )
-            ]
+        whole = b"".join(audio.get(cid, b"") for cid in ordered)
+        outputs: list[NamedBlob] = []
+        if plan.output_mode in ("mp4", "m4b"):
+            outputs.append(NamedBlob(filename=f"{plan.slug}.{plan.output_mode}", data=whole))
+        outputs.append(NamedBlob(filename=f"{plan.slug}.mp3", data=whole))
         return MuxResult(outputs=outputs, timings=timings, chapter_count=len(plan.chapters))
 
 
