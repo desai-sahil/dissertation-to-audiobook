@@ -52,6 +52,7 @@ def test_chapter6_sample_renders_m4b_via_cli(sample_pdf: Path, tmp_path: Path) -
 
     provs = list(tmp_path.glob("*.provenance.json"))
     assert len(provs) == 1
+    assert len(list(tmp_path.glob("*.qa.md"))) == 1  # curator transparency artifact written
     prov = ProvenanceMap.model_validate_json(provs[0].read_text(encoding="utf-8"))
     assert prov.segments
     # The cache was populated, so a re-render would be served from disk.

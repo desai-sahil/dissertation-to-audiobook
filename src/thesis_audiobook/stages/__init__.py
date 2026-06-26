@@ -7,6 +7,7 @@ from thesis_audiobook.stages.assemble_audio import AssembleAudioStage
 from thesis_audiobook.stages.assemble_script import AssembleScriptStage
 from thesis_audiobook.stages.build_ir import BuildIrStage
 from thesis_audiobook.stages.citations import CitationsStage
+from thesis_audiobook.stages.curate import CurateStage
 from thesis_audiobook.stages.figures import FiguresStage
 from thesis_audiobook.stages.ingest import IngestStage
 from thesis_audiobook.stages.lexicon import LexiconStage
@@ -21,6 +22,7 @@ def default_stages() -> list[Stage]:
         IngestStage(),
         BuildIrStage(),
         SelectStage(),
+        CurateStage(),
         MathStage(),
         FiguresStage(),
         CitationsStage(),

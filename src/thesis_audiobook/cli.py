@@ -20,6 +20,7 @@ from thesis_audiobook.bootstrap import build_context
 from thesis_audiobook.chunking import preview_chunks
 from thesis_audiobook.config import Config, OutputMode, ParserBackend, profile_for
 from thesis_audiobook.cost import estimate_cost
+from thesis_audiobook.curate import PronunciationPlan
 from thesis_audiobook.ir import Chunk, Document, DocumentMeta
 from thesis_audiobook.linkage import citation_linkage
 from thesis_audiobook.stages import build_default_pipeline
@@ -98,6 +99,36 @@ def _write_review_artifacts(out: Path, doc: Document) -> tuple[Path, Path]:
     return script_path, chunks_path
 
 
+def _format_qa(plan: PronunciationPlan | None) -> str:
+    """Render the curator's plan as a human-readable transparency report."""
+    lines = ["# Pronunciation QA (LLM curator)", ""]
+    # Notes alone still matter (is_empty ignores them): surface the curator's flagged
+    # uncertainties even when it mapped nothing.
+    if plan is None or (plan.is_empty() and not plan.notes):
+        lines.append("Curator returned no entries (offline mock, or nothing to curate).")
+        return "\n".join(lines) + "\n"
+
+    def cell(value: str) -> str:
+        return value.replace("|", "\\|")
+
+    if plan.acronyms:
+        lines += ["## Acronyms", "", "| acronym | first use | short form |", "|---|---|---|"]
+        lines += [
+            f"| {cell(a.acronym)} | {cell(a.first_use)} | {cell(a.short_form)} |"
+            for a in plan.acronyms
+        ]
+        lines.append("")
+    if plan.terms:
+        lines += ["## Terms", "", "| term | spoken |", "|---|---|"]
+        lines += [f"| {cell(t.term)} | {cell(t.spoken)} |" for t in plan.terms] + [""]
+    if plan.notation:
+        lines += ["## Notation", "", "| written | spoken |", "|---|---|"]
+        lines += [f"| {cell(n.written)} | {cell(n.spoken)} |" for n in plan.notation] + [""]
+    if plan.notes:
+        lines += ["## Notes / flagged", ""] + [f"- {note}" for note in plan.notes]
+    return "\n".join(lines) + "\n"
+
+
 @app.command()
 def run(
     input_pdf: Annotated[Path, typer.Argument(help="Path to the thesis PDF.")],
@@ -118,6 +149,9 @@ def run(
         str | None,
         typer.Option("--voice", help="ElevenLabs voice id (required for --tts elevenlabs)."),
     ] = None,
+    no_curate: Annotated[
+        bool, typer.Option("--no-curate", help="Skip the LLM pronunciation curator.")
+    ] = False,
     seed: Annotated[int, typer.Option(help="Determinism seed.")] = 0,
     out: Annotated[Path, typer.Option(help="Output directory.")] = Path("out"),
     cache_dir: Annotated[Path, typer.Option(help="Content-addressed TTS cache directory.")] = Path(
@@ -144,6 +178,7 @@ def run(
         cache_dir=str(cache_dir),
         parser_backend=_validate_parser(parser),
         output_mode=_validate_format(audio_format),
+        curate=not no_curate,
     )
     if preview:
         # A preview renders with the cheap flash model, not the deliverable model.
@@ -155,8 +190,10 @@ def run(
         config,
         pdf_bytes=input_pdf.read_bytes(),
         log_enabled=False,
-        use_real_llm=use_real_llm,
-        use_real_tts=use_real_tts,
+        # --dry-run makes zero external calls, so force the mocks even with --llm/--tts set
+        # (the curator and gloss stages run before assemble_script).
+        use_real_llm=use_real_llm and not dry_run,
+        use_real_tts=use_real_tts and not dry_run,
     )
     pipeline = build_default_pipeline()
     seed_doc = Document(meta=DocumentMeta(title="(pending)"))
@@ -210,6 +247,8 @@ def run(
     provenance_path = out / f"{slug}.provenance.json"
     if ctx.provenance is not None:
         provenance_path.write_text(ctx.provenance.model_dump_json(indent=2), encoding="utf-8")
+    qa_path = out / f"{slug}.qa.md"
+    qa_path.write_text(_format_qa(ctx.pronunciation_plan), encoding="utf-8")
 
     estimate = estimate_cost(doc.script or "", config.usd_per_character)
     llm_backend = "anthropic (real)" if use_real_llm else "mock"
@@ -228,6 +267,7 @@ def run(
     typer.echo(f"  chunk plan        : {chunks_path}")
     typer.echo(f"  {audio_label:<18}: {audio_list} ({total_bytes} bytes)")
     typer.echo(f"  provenance        : {provenance_path}")
+    typer.echo(f"  pronunciation qa  : {qa_path}")
     typer.echo("  Gate A warnings:")
     typer.echo(ctx.warnings.report())
     if use_real_tts:

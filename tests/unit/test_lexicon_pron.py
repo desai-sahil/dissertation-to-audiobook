@@ -21,12 +21,14 @@ class _Recorder:
         return silent_wav(seconds=len(req.text) / 15.0)
 
 
-def test_pronunciation_file_loads_expected_rules() -> None:
+def test_pronunciation_file_is_slim_pronunciation_aids_only() -> None:
     lexicon = load_pronunciation_lexicon()
     assert lexicon.version  # versioned, source-controlled
     aliases = {rule.string_to_replace for rule in lexicon.rules if rule.type == "alias"}
-    assert {"gs", "goxz", "psi_xyl", "slac1", "GhSLAC1", "osca1", "WT", "ABA"} <= aliases
-    # Greek is the one case reserved for phoneme rules.
+    # Plain-English terms are normalizer territory, not pronunciation aids - dropped.
+    assert {"gs", "goxz", "ABA", "WT"}.isdisjoint(aliases)
+    # Genuine voice-manglers (gene names) plus the Greek phoneme remain.
+    assert {"NADPH", "ABI1"} <= aliases
     assert any(rule.type == "phoneme" for rule in lexicon.rules)
 
 

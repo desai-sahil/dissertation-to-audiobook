@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from thesis_audiobook.config import Config
+from thesis_audiobook.curate import PronunciationPlan
 from thesis_audiobook.lexicon import DEFAULT_LEXICON, Lexicon
 from thesis_audiobook.log import StructuredLogger
 from thesis_audiobook.ports.audio import AudioMuxer, NamedBlob
@@ -61,6 +62,7 @@ class Context:
     pronunciation_lexicon: PronunciationLexicon = field(default_factory=_empty_pronunciation)
     # Run-scoped state.
     pdf_bytes: bytes = b""
+    pronunciation_plan: PronunciationPlan | None = None
     dictionary_locators: list[DictionaryLocator] = field(default_factory=_new_locators)
     rendered: dict[str, bytes] = field(default_factory=_new_byte_map)
     final_audio: bytes = b""

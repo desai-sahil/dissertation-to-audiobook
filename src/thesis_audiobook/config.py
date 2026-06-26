@@ -79,6 +79,8 @@ class Config(StrictModel):
     usd_per_character: float = 0.00003
     output_dir: str = "out"
     chunk_char_limit: int = 2000
+    # LLM pronunciation curator (per-document). On by default; --no-curate disables it.
+    curate: bool = True
     # Audio assembly: a single M4B with chapter markers, or flat per-chapter MP3s.
     output_mode: OutputMode = "m4b"
     narrator: str = "Audiobook narrator"

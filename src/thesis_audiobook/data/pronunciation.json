@@ -1,14 +1,8 @@
 {
-  "version": "2026-06-25.1",
+  "version": "2026-06-26.1",
   "rules": [
-    {"type": "alias", "string_to_replace": "gs", "alias": "stomatal conductance"},
-    {"type": "alias", "string_to_replace": "goxz", "alias": "outside xylem conductance"},
-    {"type": "alias", "string_to_replace": "psi_xyl", "alias": "xylem water potential"},
-    {"type": "alias", "string_to_replace": "slac1", "alias": "slac one"},
-    {"type": "alias", "string_to_replace": "GhSLAC1", "alias": "G H slac one"},
-    {"type": "alias", "string_to_replace": "osca1", "alias": "osca one"},
-    {"type": "alias", "string_to_replace": "WT", "alias": "wild type"},
-    {"type": "alias", "string_to_replace": "ABA", "alias": "abscisic acid"},
-    {"type": "phoneme", "string_to_replace": "ψ", "phoneme": "saɪ", "alphabet": "ipa"}
+    {"type": "phoneme", "string_to_replace": "ψ", "phoneme": "saɪ", "alphabet": "ipa"},
+    {"type": "alias", "string_to_replace": "NADPH", "alias": "N A D P H"},
+    {"type": "alias", "string_to_replace": "ABI1", "alias": "A B I one"}
   ]
 }
