@@ -13,6 +13,28 @@ from thesis_audiobook.curate import apply_plan, parse_plan
 from thesis_audiobook.ir import Block, BlockType, Document, DocumentMeta
 from thesis_audiobook.stages.curate import CurateStage
 
+
+def test_abbreviation_map_introduces_then_spells_across_document() -> None:
+    # M7: gs (lowercase, space-separated after math cleanup) and OXZ are introduced once on
+    # first global use, then spoken as the spelled short form everywhere after - even across
+    # separate blocks (whole-document, not per-block).
+    plan = parse_plan(
+        '{"acronyms":[{"acronym":"g s","first_use":"stomatal conductance","short_form":"g s"},'
+        '{"acronym":"OXZ","first_use":"outside xylem zone","short_form":"O X Z"}]}'
+    )
+    out = apply_plan(
+        [
+            "We measured g s in the leaf.",
+            "Later, g s dropped and the OXZ collapsed.",
+            "The OXZ recovered overnight.",
+        ],
+        plan,
+    )
+    assert out[0] == "We measured stomatal conductance (g s) in the leaf."
+    assert out[1] == "Later, g s dropped and the outside xylem zone (O X Z) collapsed."
+    assert out[2] == "The O X Z recovered overnight."  # already introduced -> spelled form
+
+
 PLAN_JSON = (
     '{"acronyms":[{"acronym":"ABA","first_use":"abscisic acid","short_form":"A B A"},'
     '{"acronym":"VPD","first_use":"vapor pressure deficit","short_form":"V P D"}],'

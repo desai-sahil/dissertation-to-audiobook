@@ -16,7 +16,7 @@ import re
 
 from thesis_audiobook.ir import StrictModel
 
-CURATOR_VERSION = "curate-v1"
+CURATOR_VERSION = "curate-v2"
 CURATOR_SYSTEM = (
     "You produce a pronunciation plan for an audiobook. Decide only HOW terms are said, "
     "never WHAT is said. Return ONLY the JSON object requested - no prose, no markdown fences."
@@ -64,14 +64,24 @@ def build_curate_prompt(document_text: str) -> str:
         "Return ONLY a JSON object describing how special terms should be SPOKEN. Do NOT "
         "rewrite, summarize, or change any prose - only map tokens to spoken forms.\n\n"
         "JSON shape:\n"
-        '{"acronyms":[{"acronym":"ABA","first_use":"abscisic acid","short_form":"A B A"}],'
+        '{"acronyms":[{"acronym":"ABA","first_use":"abscisic acid","short_form":"A B A"},'
+        '{"acronym":"g s","first_use":"stomatal conductance","short_form":"g s"},'
+        '{"acronym":"OXZ","first_use":"outside xylem zone","short_form":"O X Z"}],'
         '"terms":[{"term":"AtRBOHD","spoken":"arbo D"}],'
         '"notation":[{"written":"psi apo ssc","spoken":"apoplastic subsidiary-cell water '
         'potential"}],"dehyphenations":[{"broken":"me-asurable","fixed":"measurable"}],'
         '"notes":["anything you were unsure about"]}\n\n'
         "Rules:\n"
-        "- acronyms: give the full first_use expansion and a short_form spoken as letters "
-        '("A B A") unless a lab says it as a word (ROS -> "ross", SPAC -> "spack").\n'
+        "- acronyms: this is the document's ABBREVIATION KNOWLEDGE MAP. Cover BOTH uppercase "
+        "abbreviations (OXZ, VPD, ABA, AQD, FRET) AND lowercase scientific variable-symbols. "
+        "Subscripted symbols arrive space-separated after math cleanup, e.g. the variable g_s "
+        'appears as "g s", psi_xyl as "psi xyl", VPD_leaf as "VPD leaf" - map those too. For '
+        'each, give the full first_use expansion and a short_form spoken as letters: "g s" -> '
+        'first_use "stomatal conductance", short_form "g s"; "OXZ" -> first_use "outside xylem '
+        'zone", short_form "O X Z"; "ABA" -> "A B A" - UNLESS a lab says it as a word (ROS -> '
+        '"ross", SPAC -> "spack"). The full term is introduced once, on first use, then only '
+        "the spelled short_form is spoken thereafter (the pipeline handles that automatically; "
+        "you only provide the map).\n"
         "- terms: gene/protein names a TTS voice would mispronounce.\n"
         '- notation: flattened math/symbols (e.g. "psi apo ssc") mapped to plain words.\n'
         '- dehyphenations: words a PDF line break split with a stray hyphen ("me-asurable" '
