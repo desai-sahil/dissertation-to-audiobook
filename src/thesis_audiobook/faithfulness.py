@@ -21,12 +21,21 @@ from typing import Any
 
 from thesis_audiobook.ir import StrictModel
 
-AUDITOR_VERSION = "auditor-v1"
+AUDITOR_VERSION = "auditor-v2"  # bump invalidates cached verdicts when the prompt changes
 AUDITOR_SYSTEM = (
-    "You audit a single audiobook edit for faithfulness. An edit may change only HOW text is "
-    "spoken, never the facts. You are adversarial: if the spoken form asserts anything the "
-    "original does not support, it is UNFAITHFUL. When in any doubt, answer unfaithful. Return "
-    "ONLY the requested JSON object; no prose, no markdown fences."
+    "You audit one audiobook edit. The edit re-renders WRITTEN text - symbols, math notation, "
+    "chemical formulas, units, abbreviations - into SPOKEN words. Re-rendering the SAME content "
+    "in different words is FAITHFUL and is the whole point; judge by what each form DENOTES, "
+    "using your domain knowledge. An edit is UNFAITHFUL only when the spoken form changes the "
+    "CONTENT: a different numeric value or unit, a flipped relation or direction (more vs less, "
+    "increase vs decrease, a dropped or added negation), or a different named entity. Do not flag "
+    "a mere difference in WORDING for the same thing; do flag any real change in WHAT is said. "
+    "Calibration: 'CO squared' -> 'carbon dioxide' FAITHFUL (same compound, CO2); 'g s' -> "
+    "'stomatal conductance' FAITHFUL (the symbol's meaning); 'eight point three one four' -> "
+    "'eight point three one five' UNFAITHFUL (value changed); 'less than' -> 'greater than' "
+    "UNFAITHFUL (relation flipped); 'not significant' -> 'significant' UNFAITHFUL (negation "
+    "dropped); 'Mott' -> 'Mott twenty thirteen' UNFAITHFUL (a year was added). Return ONLY the "
+    "requested JSON object; no prose, no markdown fences."
 )
 AUDITOR_MAX_TOKENS = 400
 
@@ -34,16 +43,16 @@ AUDITOR_MAX_TOKENS = 400
 AUDIT_FRAMINGS: list[tuple[str, str]] = [
     (
         "extract",
-        "List the facts in ORIGINAL (every number, value, unit, name, citation, and the core "
-        "claim/relation), then the facts in SPOKEN. If SPOKEN adds, drops, or alters ANY fact, "
-        "it is unfaithful.",
+        "List what ORIGINAL denotes (each value, unit, name, and the core claim or relation), "
+        "then what SPOKEN denotes. Are they the SAME content, only re-worded for the ear? It is "
+        "unfaithful only if a value, unit, relation, negation, or named entity actually differs.",
     ),
     (
         "skeptic",
-        "Try to find one thing SPOKEN says that ORIGINAL does not support - a changed number or "
-        "unit, an added or altered name, a flipped relation (increase vs decrease, a negation, "
-        "'significant' vs 'not significant'), or any invented content. If you find one, it is "
-        "unfaithful.",
+        "Hunt for a real change of CONTENT, not of form: does SPOKEN state a different value or "
+        "unit, flip a relation or negation, or name a different entity than ORIGINAL? Re-saying "
+        "the same quantity in words (a formula as its name, a symbol as its word) is NOT a "
+        "change. Unfaithful only if WHAT is said changed, not merely HOW.",
     ),
 ]
 
@@ -56,11 +65,12 @@ class AuditVerdict(StrictModel):
 
 def build_audit_prompt(anchor: str, output: str, framing: str) -> str:
     return (
-        "An audiobook edit changes only how existing text is PRONOUNCED, never its facts.\n\n"
+        "An audiobook edit re-renders written text into spoken words. It must keep the same "
+        "content; it may change only how that content is worded for the ear.\n\n"
         f"ORIGINAL: {anchor}\n"
         f"SPOKEN:   {output}\n\n"
         f"{framing}\n\n"
-        'Return ONLY: {"faithful": true or false, "offending": "the changed fact, or empty", '
+        'Return ONLY: {"faithful": true or false, "offending": "the changed content, or empty", '
         '"reason": "one short clause"}'
     )
 
