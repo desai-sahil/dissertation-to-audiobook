@@ -117,12 +117,18 @@ def _attach_sections(blocks: list[Block]) -> None:
 
 
 def _tag_references_region(blocks: list[Block]) -> None:
+    # A references region runs from a "References"/"Bibliography" heading (or the first
+    # reference entry) until the next heading. Resetting at each heading is what makes
+    # per-chapter bibliographies work: tagging would otherwise run away and swallow every
+    # following chapter as backmatter once the first chapter's bibliography appears.
     in_references = False
     for block in blocks:
-        if not in_references:
-            is_marker = block.type is BlockType.reference_list
-            is_heading = block.text.strip().lower() in _BACKMATTER_HEADINGS
-            in_references = is_marker or is_heading
+        is_backmatter_title = block.text.strip().lower() in _BACKMATTER_HEADINGS
+        if block.type is BlockType.heading and not is_backmatter_title:
+            in_references = False  # a different section heading ends the references region
+            continue
+        if is_backmatter_title or block.type is BlockType.reference_list:
+            in_references = True
         if in_references:
             block.type = BlockType.backmatter
 
@@ -172,16 +178,21 @@ class BuildIrStage:
         if stripped:
             ctx.log.info("stripped_artifacts", count=stripped)
 
-        # Title spillovers first, so a wrapped-title fragment is pulled up into its
-        # heading before the cross-page merge could swallow it into the next paragraph.
-        kept = _merge_title_spillovers(kept, ctx)
-        kept = _merge_cross_page_continuations(kept, ctx)
-
+        # Refine types BEFORE the merges. Marker drops the (repeated) "Bibliography" heading as
+        # a running artifact, so a reference list ("- [1] Author...") can end up adjacent to a
+        # preceding unterminated paragraph (a Data Availability note ending in a URL). Typing it
+        # reference_list first stops the cross-page merge (paragraph->paragraph only) from
+        # absorbing the whole bibliography into that paragraph and speaking it aloud.
         for block in kept:
             if block.type is BlockType.paragraph:
                 refined = classify_block(block.text)
                 if refined is not BlockType.paragraph:
                     block.type = refined
+
+        # Title spillovers first, so a wrapped-title fragment is pulled up into its
+        # heading before the cross-page merge could swallow it into the next paragraph.
+        kept = _merge_title_spillovers(kept, ctx)
+        kept = _merge_cross_page_continuations(kept, ctx)
 
         _attach_sections(kept)
         _tag_references_region(kept)

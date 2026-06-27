@@ -20,7 +20,8 @@ _LIGATURES = {
 _CHAPTER = re.compile(r"^\s*CHAPTER\s+(\d+)\s*$", re.IGNORECASE)
 _SECTION = re.compile(r"^\s*(\d+(?:\.\d+)+)\s+(.*\S)\s*$")
 _SECTION_NUMBER_ONLY = re.compile(r"^\s*(\d+(?:\.\d+)+)\s*$")
-_REFERENCE = re.compile(r"^\s*\[(\d+)\]\s")
+# A reference entry: "[1] Author..." or Marker's markdown list form "- [1] Author...".
+_REFERENCE = re.compile(r"^\s*[-*•]?\s*\[(\d+)\]\s")
 _PAGE_NUMBER = re.compile(r"^\s*\d{1,4}\s*$")
 
 

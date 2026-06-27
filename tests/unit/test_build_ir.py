@@ -115,6 +115,35 @@ def test_tags_references_region_from_paragraph(tiny_ir_path: Path) -> None:
     assert kinds["doi"] is BlockType.backmatter
 
 
+def test_markdown_bulleted_reference_not_absorbed_by_data_availability(tiny_ir_path: Path) -> None:
+    # Marker drops the repeated "Bibliography" heading and lists entries as "- [1] ...". A Data
+    # Availability note ends in a URL (no period), so without typing the list first the merge
+    # would swallow the whole bibliography into that paragraph and speak it. It must not.
+    blocks = [
+        Block(id="da", type=BlockType.paragraph, text="All codes can be found at https://x.io/repo"),
+        Block(id="r1", type=BlockType.paragraph, text="- [1] A. Author. A title. Journal, 2019."),
+        Block(id="r2", type=BlockType.paragraph, text="- [2] B. Writer. Another. Journal, 2020."),
+    ]
+    out = _run(blocks, _ctx(tiny_ir_path))
+    kinds = {b.id: b.type for b in out.blocks}
+    assert kinds["da"] is BlockType.paragraph  # the note stays its own spoken block
+    assert "[1]" not in out.blocks[0].text  # the references were NOT absorbed into it
+    assert kinds["r1"] is BlockType.backmatter and kinds["r2"] is BlockType.backmatter
+
+
+def test_per_chapter_bibliography_does_not_run_away(tiny_ir_path: Path) -> None:
+    # A references region ends at the next chapter heading; tagging must not swallow it.
+    blocks = [
+        Block(id="r1", type=BlockType.paragraph, text="- [1] A. Author. A title. 2019."),
+        Block(id="ch2", type=BlockType.heading, chapter=2, text="CHAPTER 2"),
+        Block(id="body2", type=BlockType.paragraph, text="The second chapter body continues."),
+    ]
+    out = _run(blocks, _ctx(tiny_ir_path))
+    kinds = {b.id: b.type for b in out.blocks}
+    assert kinds["r1"] is BlockType.backmatter
+    assert kinds["ch2"] is BlockType.heading and kinds["body2"] is BlockType.paragraph
+
+
 def test_attaches_section_to_body_paragraphs(tiny_ir_path: Path) -> None:
     blocks = [
         Block(id="h", type=BlockType.heading, section="6.2", text="Results"),
