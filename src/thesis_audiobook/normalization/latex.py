@@ -151,6 +151,10 @@ _CHEM_SUP = [
     (re.compile(r"\bCO<sup>2</sup>", re.IGNORECASE), "CO2"),
     (re.compile(r"\bO<sup>2</sup>", re.IGNORECASE), "O2"),
 ]
+# An "x" or "×" between two numbers is a multiplication sign. Marker leaves the italic *x* glued
+# as "1.804x10", which the number normalizer otherwise garbles ("one.eight hundred four x one
+# zero"); read it as "times" so the operands parse as proper numbers.
+_TIMES_X = re.compile(r"(?<=[0-9.])\s*[x×]\s*(?=[0-9])")
 _SUB = re.compile(r"<sub>(?P<body>.*?)</sub>", re.IGNORECASE | re.DOTALL)
 _BR = re.compile(r"<br\s*/?>", re.IGNORECASE)
 _WRAPPER_CMD = re.compile(r"\\(?:rm|text|mathrm|mathbf|mathit|mathcal|operatorname|left|right)\b")
@@ -220,6 +224,7 @@ def clean_markup(text: str) -> str:
     # stray marker) becomes a space, so it is never voiced as the word "asterisk".
     text = _EMPH.sub(lambda m: m.group("b") or m.group("i") or "", text)
     text = text.replace("*", " ")
+    text = _TIMES_X.sub(" times ", text)  # "1.804x10" -> "1.804 times 10"
     # Literal unicode math glyphs (and OCR degree marks) left in the prose -> spoken words.
     text = text.translate(_UNICODE_TABLE)
     return " ".join(text.split())
@@ -238,6 +243,8 @@ def _script_repl_html(match: re.Match[str]) -> str:
         if all(ch in "+-−.0123456789" for ch in body):
             signed = body.replace("−", " minus ").replace("+", " plus ")
             return f"{pre} to the power of {signed}"
+        if body.lower() in ("o", "◦", "°"):  # "40<sup>o</sup>C" -> a degree sign, not letter o
+            return f"{pre} degrees "
         return f"{pre} {body}"
     # pre is empty: classify by the (unconsumed) character before the tag.
     before = match.string[match.start() - 1] if match.start() > 0 else ""

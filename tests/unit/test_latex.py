@@ -114,6 +114,20 @@ def test_clean_markup_unicode_math_glyphs() -> None:
     assert "−" not in clean_markup("a − b") and "minus" in clean_markup("a − b")
 
 
+def test_clean_markup_times_between_numbers() -> None:
+    # The italic *x* Marker glues as "1.804x10" must read as multiplication, not garble the
+    # number (was "one.eight hundred four x one zero" after normalization).
+    assert clean_markup("v = 1.804*x*10<sup>5</sup>") == "v = 1.804 times 10 to the power of 5"
+    assert clean_markup("about 4.2 x 10<sup>3</sup>") == "about 4.2 times 10 to the power of 3"
+    # an "x" not flanked by two digits is left alone (variable / magnification)
+    assert "times" not in clean_markup("the 10x* objective")  # digit-x-space, not digit-x-digit
+
+
+def test_clean_markup_superscript_degree() -> None:
+    assert clean_markup("at 40<sup>o</sup>C here") == "at 40 degrees C here"
+    assert clean_markup("at 25<sup>o</sup>C") == "at 25 degrees C"
+
+
 def test_clean_markup_chemical_formula_superscripts() -> None:
     # Marker mis-typesets CO2 etc. with a superscript; read as the formula, not "CO squared".
     assert clean_markup("the CO<sup>2</sup> rate") == "the CO2 rate"

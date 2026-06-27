@@ -17,6 +17,8 @@ _GREEK_LETTERS: dict[str, str] = {
     "Δ": "delta", "Φ": "phi", "Ψ": "psi", "Σ": "sigma", "Ω": "omega",
     "Θ": "theta", "Λ": "lambda", "Π": "pi", "Γ": "gamma",
     "μ": "mu", "µ": "mu",
+    # Unicode "symbol" variants Marker emits instead of the plain letters.
+    "ϕ": "phi", "ϑ": "theta", "ϵ": "epsilon", "ϱ": "rho", "ϖ": "pi", "ϰ": "kappa", "ϐ": "beta",
 }  # fmt: skip
 
 
