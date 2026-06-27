@@ -61,6 +61,37 @@ def test_clean_markup_embedded_display_and_greek_spacing() -> None:
     assert "$" not in out and "psi" in out and "RT over v" in out
 
 
+def test_clean_markup_strips_markdown_emphasis() -> None:
+    # markdown bold/italic must not be voiced as "asterisk"
+    assert clean_markup("**BIOGRAPHICAL SKETCH**") == "BIOGRAPHICAL SKETCH"
+    assert clean_markup("the *adsorption-tension* activity") == "the adsorption-tension activity"
+    assert clean_markup("variable $*v*$ here").count("*") == 0
+    assert "*" not in clean_markup("a * stray * marker")  # leftover markers dropped, not voiced
+
+
+def test_clean_markup_reassembled_entity_from_marker_superscript() -> None:
+    # Marker mangles ">" as "<sup>&</sup>gt;"; the sup handler reassembles "&gt;", which the
+    # entity pass (run AFTER sup/sub) must then convert. Was leaking "&gt;" into the audio.
+    assert "greater than" in clean_markup("(I/I) *<sup>i</sup>* <sup>&</sup>gt; <sup>0</sup>")
+    assert "&" not in clean_markup("x <sup>&</sup>gt; y")
+
+
+def test_clean_markup_html_entities_and_inverted_marks() -> None:
+    assert clean_markup("a &gt; b and c &lt; d") == "a greater than b and c less than d"
+    assert (
+        clean_markup("curing time ¡ twenty-four hours") == "curing time less than twenty-four hours"
+    )
+    assert clean_markup("excluded if ¿ ten nm") == "excluded if greater than ten nm"
+
+
+def test_clean_markup_matrix_and_nested_frac() -> None:
+    out = clean_markup(r"$\begin{bmatrix} a & b \end{bmatrix}$")
+    assert "bmatrix" not in out and "&" not in out and "\\" not in out
+    # nested \frac is handled, not leaked as the word "frac"
+    nested = clean_markup(r"$\frac{a_{x}}{b}$")
+    assert "frac" not in nested and "over" in nested
+
+
 def test_clean_markup_never_leaks_latex_or_tags() -> None:
     messy = r"$E=4.2\times10^{-5}~{\rm kg/(m^2.s)}$ and $\mu m$ scale<sup>3</sup>"
     out = clean_markup(messy)

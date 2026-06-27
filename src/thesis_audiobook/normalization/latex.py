@@ -73,7 +73,30 @@ _OPERATORS = [
     (r"\\nabla", " del "),
     (r"\\sum", " sum "),
     (r"\\int", " integral "),
+    (r"\\frac", " the fraction "),  # fallback for a nested \frac that _FRAC could not split
 ]
+# HTML entities and OCR-garbled comparison glyphs -> spoken words. The inverted marks (¡ ¿)
+# are how this thesis's OCR rendered "<" / ">"; they never occur in normal English prose.
+_ENTITY = {
+    "&gt;": " greater than ",
+    "&lt;": " less than ",
+    "&ge;": " greater than or equal to ",
+    "&le;": " less than or equal to ",
+    "&ne;": " not equal to ",
+    "&times;": " times ",
+    "&minus;": " minus ",
+    "&plusmn;": " plus or minus ",
+    "&deg;": " degrees ",
+    "&amp;": " and ",
+    "&nbsp;": " ",
+    "¡": " less than ",
+    "¿": " greater than ",
+}
+_ENTITY_RE = re.compile("|".join(re.escape(key) for key in _ENTITY))
+# Markdown emphasis: **bold** / *italic*. Stripped so the markers are not voiced as "asterisk".
+_EMPH = re.compile(r"\*\*(?P<b>.+?)\*\*|\*(?P<i>[^*\n]+?)\*", re.DOTALL)
+# A LaTeX environment wrapper (e.g. \begin{bmatrix} ... \end{bmatrix}); drop the markers.
+_ENV = re.compile(r"\\(?:begin|end)\{[^}]*\}")
 _DISPLAY_MATH = re.compile(r"^\$\$(?P<body>.+?)\$\$$", re.DOTALL)
 _DISPLAY_INLINE = re.compile(r"\$\$(?P<body>.+?)\$\$", re.DOTALL)
 _INLINE_MATH = re.compile(r"\$(?P<body>[^$]+?)\$")
@@ -86,7 +109,9 @@ _SUB = re.compile(r"<sub>(?P<body>.*?)</sub>", re.IGNORECASE | re.DOTALL)
 _BR = re.compile(r"<br\s*/?>", re.IGNORECASE)
 _WRAPPER_CMD = re.compile(r"\\(?:rm|text|mathrm|mathbf|mathit|mathcal|operatorname|left|right)\b")
 _TAG = re.compile(r"\\tag\{[^}]*\}")
-_FRAC = re.compile(r"\\frac\s*\{(?P<num>[^{}]*)\}\s*\{(?P<den>[^{}]*)\}")
+_FRAC = re.compile(
+    r"\\frac\s*\{(?P<num>(?:[^{}]|\{[^{}]*\})*)\}\s*\{(?P<den>(?:[^{}]|\{[^{}]*\})*)\}"
+)
 _GREEK_CMD = re.compile(r"\\([A-Za-z]+)")
 _SCRIPT = re.compile(r"[_^]\{?([A-Za-z0-9%,.\-+]*)\}?")
 _SPACE_CMD = re.compile(r"\\[,;!:> ]|~")
@@ -111,6 +136,8 @@ def _script_repl(match: re.Match[str]) -> str:
 def _delatex(expr: str) -> str:
     """Turn a LaTeX fragment into plain spoken-ish tokens (best-effort, never raises)."""
     expr = _TAG.sub("", expr)
+    expr = _ENV.sub(" ", expr)  # drop \begin{bmatrix}/\end{bmatrix} environment markers
+    expr = expr.replace("&", " ")  # matrix/table column separators
     expr = _WRAPPER_CMD.sub("", expr)
     expr = _FRAC.sub(lambda m: f"{m.group('num')} over {m.group('den')}", expr)
     for pattern, word in _OPERATORS:
@@ -126,17 +153,25 @@ def _delatex(expr: str) -> str:
 
 
 def clean_markup(text: str) -> str:
-    """Convert inline LaTeX + HTML markup to plain text. No-op on clean (poppler) prose."""
-    if "$" not in text and "<" not in text and "\\" not in text:
+    """Convert inline LaTeX, HTML markup, and markdown emphasis to plain text. No-op on clean
+    (poppler) prose."""
+    if not any(ch in text for ch in "$<\\*&¡¿"):
         return text
     text = _BR.sub(" ", text)
     text = _SUP.sub(_script_repl_html, text)
     text = _SUB.sub(lambda m: f" {m.group('body')}" if m.group("body").strip() else "", text)
     text = _TAG_DROP.sub("", text)
+    # Entities AFTER <sup>/<sub>: Marker can split ">" as "<sup>&</sup>gt;", which the sup
+    # handler reassembles into "&gt;"; convert those (and the OCR ¡/¿ marks) to words here.
+    text = _ENTITY_RE.sub(lambda m: _ENTITY[m.group(0)], text)
     # $$...$$ first (a display equation embedded mid-paragraph, not a standalone block), then
     # single-$ inline math. Both convert to plain tokens so no raw LaTeX survives.
     text = _DISPLAY_INLINE.sub(lambda m: f" {_delatex(m.group('body'))} ", text)
     text = _INLINE_MATH.sub(lambda m: f" {_delatex(m.group('body'))} ", text)
+    # Markdown emphasis: keep the content, drop the markers. Any leftover '*' (an unpaired or
+    # stray marker) becomes a space, so it is never voiced as the word "asterisk".
+    text = _EMPH.sub(lambda m: m.group("b") or m.group("i") or "", text)
+    text = text.replace("*", " ")
     return " ".join(text.split())
 
 
