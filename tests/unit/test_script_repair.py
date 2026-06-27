@@ -40,6 +40,10 @@ class _FakeLlm:
         ("CO squared", "carbon dioxide", True),  # pronunciation swap, no new facts
         ("mm", "millimeters", True),
         ("H two degrees", "water", True),
+        # a leaked fragment ending "(two point nine)" -> announce; "Equation" is structural, and
+        # the number is sourced from find, so this is safe
+        ("equals mu and so on (two point nine)", "Equation two point nine", True),
+        ("see the diagram", "see Figure three", False),  # but a NEW number is still fabrication
         ("Buckley and Mott", "Buckley and Mott twenty thirteen", False),  # fabricated year
         ("the first chapter", "the second chapter", False),  # fabricated ordinal
         ("conductance & Sack", "Scoffoni and Sack", False),  # fabricated name

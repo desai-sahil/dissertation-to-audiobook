@@ -91,16 +91,39 @@ _NUMBER_WORDS = frozenset(
     ]
 )
 _WORD = re.compile(r"[\w']+")
+# Capitalized navigation words are scaffolding, not facts about the thesis, so introducing one
+# is safe (the NUMBER it points at is still guarded as a number-word). This lets the model turn
+# a leaked fragment into "Equation two point nine" without the guard flagging "Equation".
+_STRUCTURAL = frozenset(
+    [
+        "equation",
+        "equations",
+        "section",
+        "subsection",
+        "chapter",
+        "figure",
+        "table",
+        "panel",
+        "appendix",
+        "appendices",
+        "part",
+        "step",
+        "theorem",
+        "lemma",
+    ]
+)
 
 
 def _factual_tokens(text: str) -> set[str]:
     """Lower-cased tokens that assert a fact: digit-bearing words, spoken number/ordinal words,
-    and capitalized proper nouns (len >= 2, not an all-caps acronym/symbol)."""
+    and capitalized proper nouns (len >= 2, not an all-caps acronym/symbol or a structural word)."""
     tokens: set[str] = set()
     for word in _WORD.findall(text):
         lower = word.lower()
         is_number = lower in _NUMBER_WORDS or any(ch.isdigit() for ch in word)
-        is_proper = len(word) >= 2 and word[0].isupper() and not word.isupper()
+        is_proper = (
+            len(word) >= 2 and word[0].isupper() and not word.isupper() and lower not in _STRUCTURAL
+        )
         if is_number or is_proper:
             tokens.add(lower)
     return tokens
