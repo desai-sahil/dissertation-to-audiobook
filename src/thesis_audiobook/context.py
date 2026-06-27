@@ -25,6 +25,7 @@ from thesis_audiobook.ports.tts import TtsClient
 from thesis_audiobook.pronunciation import DictionaryLocator, PronunciationLexicon
 from thesis_audiobook.provenance import ProvenanceMap
 from thesis_audiobook.script_qc import ScriptQcReport
+from thesis_audiobook.script_repair import AppliedRepair, RejectedRepair, ScriptRepairPlan
 from thesis_audiobook.warnings import WarningsSink
 
 
@@ -48,6 +49,14 @@ def _new_blobs() -> list[NamedBlob]:
     return []
 
 
+def _new_applied() -> list[AppliedRepair]:
+    return []
+
+
+def _new_rejected() -> list[RejectedRepair]:
+    return []
+
+
 @dataclass
 class Context:
     config: Config
@@ -67,6 +76,9 @@ class Context:
     cover_image: bytes | None = None
     structure_map: StructureMap | None = None
     script_qc_report: ScriptQcReport | None = None
+    script_repair_plan: ScriptRepairPlan | None = None
+    script_repair_applied: list[AppliedRepair] = field(default_factory=_new_applied)
+    script_repair_rejected: list[RejectedRepair] = field(default_factory=_new_rejected)
     pronunciation_plan: PronunciationPlan | None = None
     dictionary_locators: list[DictionaryLocator] = field(default_factory=_new_locators)
     rendered: dict[str, bytes] = field(default_factory=_new_byte_map)

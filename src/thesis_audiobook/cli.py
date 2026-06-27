@@ -46,6 +46,7 @@ from thesis_audiobook.extraction_repair import (
 from thesis_audiobook.ir import Chunk, Document, DocumentMeta, StructureMap
 from thesis_audiobook.linkage import citation_linkage
 from thesis_audiobook.script_qc import ScriptQcReport, render_script_qc_md
+from thesis_audiobook.script_repair import render_script_repair_report
 from thesis_audiobook.stages import build_default_pipeline
 from thesis_audiobook.stages.assemble_audio import slugify
 
@@ -231,6 +232,12 @@ def run(
             help="Skip the LLM thesis cartographer (front/back matter + appendix detection).",
         ),
     ] = False,
+    no_script_repair: Annotated[
+        bool,
+        typer.Option(
+            "--no-script-repair", help="Skip the guarded auto-repair of the script (safe fixes)."
+        ),
+    ] = False,
     no_script_qc: Annotated[
         bool, typer.Option("--no-script-qc", help="Skip the phase-4 pre-TTS script QC check.")
     ] = False,
@@ -268,6 +275,7 @@ def run(
         output_mode=_validate_format(audio_format),
         curate=not no_curate,
         structure_eval=not no_structure_eval,
+        script_repair=not no_script_repair,
         script_qc=not no_script_qc,
     )
     if markdown is not None:
@@ -341,10 +349,11 @@ def run(
     _unavailable = (AnthropicUnavailableError, ElevenLabsUnavailableError, FfmpegUnavailableError)
 
     # Phase 3: prepare the narration script (build IR -> structure -> select -> math ->
-    # citations -> normalize -> assemble_script). Artifacts are written before any TTS spend.
+    # citations -> normalize -> assemble_script -> guarded script repair). Artifacts are written
+    # (post-repair) before any TTS spend.
     typer.echo("Phase 3: preparing the narration script ...")
     try:
-        doc = pipeline.run(seed_doc, ctx, to="assemble_script")
+        doc = pipeline.run(seed_doc, ctx, to="script_repair")
     except _unavailable as error:
         typer.echo(f"error: {error}", err=True)
         raise typer.Exit(code=2) from error
@@ -354,6 +363,20 @@ def run(
     structure_path = _write_structure_md(
         out, doc, ctx.structure_map, include_appendices=config.profile.include_appendices
     )
+    if ctx.script_repair_plan is not None and (
+        ctx.script_repair_applied or ctx.script_repair_rejected
+    ):
+        repair_path = out / f"{slug}.script-repair.md"
+        repair_path.write_text(
+            render_script_repair_report(
+                ctx.script_repair_plan, ctx.script_repair_applied, ctx.script_repair_rejected
+            ),
+            encoding="utf-8",
+        )
+        typer.echo(
+            f"  applied {len(ctx.script_repair_applied)} guarded script repair(s), "
+            f"{len(ctx.script_repair_rejected)} sent to review - see {repair_path}"
+        )
 
     # Phase 4: pre-TTS QC. Audit the finished script for red flags BEFORE any ElevenLabs spend.
     typer.echo("Phase 4: pre-TTS quality check ...")

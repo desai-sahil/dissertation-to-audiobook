@@ -16,6 +16,7 @@ from thesis_audiobook.stages.lexicon import LexiconStage
 from thesis_audiobook.stages.math import MathStage
 from thesis_audiobook.stages.normalize import NormalizeStage
 from thesis_audiobook.stages.script_qc import ScriptQcStage
+from thesis_audiobook.stages.script_repair import ScriptRepairStage
 from thesis_audiobook.stages.select import SelectStage
 from thesis_audiobook.stages.tts import TtsStage
 
@@ -33,6 +34,7 @@ def default_stages() -> list[Stage]:
         NormalizeStage(),
         AppendixSignpostStage(),
         AssembleScriptStage(),
+        ScriptRepairStage(),
         ScriptQcStage(),
         LexiconStage(),
         TtsStage(),

@@ -107,13 +107,21 @@ open out/<slug>.script.md          # the reviewable spoken script
 open out/<slug>.structure.md       # the cartographer's keep/skip decisions
 ```
 
+Before the artifacts are written, a **guarded auto-repair** runs: Opus proposes small
+find/replace pronunciation fixes, and only the ones that pass a no-fabrication guard are
+applied (it may change *how* text sounds, e.g. "CO squared" → "carbon dioxide", but may
+never introduce a number, year, or name the model can't verify — those go to human review).
+The applied/rejected list lands at `out/<slug>.script-repair.md`. Disable with
+`--no-script-repair`.
+
 ### Phase 4 — Pre-TTS script QC gate
 
-Opus audits the finished script for red flags that would sound wrong (leaked markup,
+Opus audits the (post-repair) script for red flags that would sound wrong (leaked markup,
 truncated sentences, OCR garble, mispronunciations). The report lands at
-`out/<slug>.script-qc.md`. The audit is read-only by design; deterministic fixes happen in
-the transforms, then you re-run. With `--tts elevenlabs`, **high-severity flags block the
-render** so you never pay to synthesize broken audio (override with `--force`).
+`out/<slug>.script-qc.md`. The audit is read-only by design; the guarded repair above
+auto-applies the safe fixes, and the remaining class-level ones become deterministic
+transforms. With `--tts elevenlabs`, **high-severity flags block the render** so you never
+pay to synthesize broken audio (override with `--force`).
 
 ### Phase 5 — Render + assemble
 
@@ -150,6 +158,7 @@ runtime in the `.mp4` and embeds as album art in the `.m4b`/`.mp3`; omit it for 
 | `--preview` | render the first chapter only, with the cheap flash model |
 | `--no-structure-eval` | skip the cartographer (use deterministic structure detection) |
 | `--no-curate` | skip the LLM pronunciation curator |
+| `--no-script-repair` | skip the guarded auto-repair (safe pronunciation fixes) |
 | `--no-script-qc` | skip the phase-4 pre-TTS script QC check |
 | `--force` | render even if phase-4 QC finds high-severity red flags |
 | `--dry-run` | cost estimate + chunk plan, zero external calls |
