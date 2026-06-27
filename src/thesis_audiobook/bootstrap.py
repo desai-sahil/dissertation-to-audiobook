@@ -115,7 +115,7 @@ def build_context(
         config=config,
         parser=parser,
         bib=bib,
-        llm=AnthropicClient() if use_real_llm else MockLlm(),
+        llm=AnthropicClient(model=config.llm_model) if use_real_llm else MockLlm(),
         tts=ElevenLabsClient(api_key=api_key) if use_real_tts else MockTts(),
         cache=FileCache(config.cache_dir),
         muxer=FfmpegMuxer() if use_real_tts else MockMuxer(),

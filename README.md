@@ -166,7 +166,8 @@ runtime in the `.mp4` and embeds as album art in the `.m4b`/`.mp3`; omit it for 
 |---|---|
 | `--markdown <path>` | ingest a pre-parsed Marker/MinerU markdown file (sets `--parser markdown`) |
 | `--parser poppler\|marker\|mineru\|markdown` | PDF parser; poppler is offline, markdown ingests phase-1 output |
-| `--llm mock\|anthropic` | cartographer + curator + table summaries + QC (anthropic costs money) |
+| `--llm mock\|anthropic` | structurer + cartographer + curator + repair/auditor + QC (anthropic costs money) |
+| `--llm-model <id>` | Anthropic model for all LLM stages (default `claude-sonnet-4-6`; `claude-opus-4-8` for max quality) |
 | `--tts mock\|elevenlabs` | speech synthesis (elevenlabs costs money; needs ffmpeg) |
 | `--format m4b\|mp4\|mp3` | chaptered file (m4b/mp4) + a whole-book mp3; `mp3` emits only the mp3 |
 | `--cover <path>` | cover image (default `cover/cover01.png`); omit to render audio-only |

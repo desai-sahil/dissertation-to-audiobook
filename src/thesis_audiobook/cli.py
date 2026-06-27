@@ -216,6 +216,14 @@ def run(
     parser: Annotated[str, typer.Option("--parser", help=_PARSER_HELP)] = "poppler",
     markdown: Annotated[Path | None, typer.Option("--markdown", help=_MARKDOWN_HELP)] = None,
     llm: Annotated[str, typer.Option("--llm", help=_LLM_HELP)] = "mock",
+    llm_model: Annotated[
+        str,
+        typer.Option(
+            "--llm-model",
+            help="Anthropic model for all LLM stages (default claude-sonnet-4-6; "
+            "use claude-opus-4-8 for the most capable, pricier runs).",
+        ),
+    ] = "claude-sonnet-4-6",
     tts: Annotated[str, typer.Option("--tts", help=_TTS_HELP)] = "mock",
     audio_format: Annotated[str, typer.Option("--format", help=_FORMAT_HELP)] = "m4b",
     cover: Annotated[Path | None, typer.Option("--cover", help=_COVER_HELP)] = None,
@@ -277,6 +285,7 @@ def run(
     config = Config(
         profile=profile_for(profile),
         seed=seed,
+        llm_model=llm_model,
         output_dir=str(out),
         cache_dir=str(cache_dir),
         parser_backend=_validate_parser(parser),

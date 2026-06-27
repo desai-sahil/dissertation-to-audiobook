@@ -60,7 +60,7 @@ def test_complete_maps_sdk_message_offline(cassette_dir: Path) -> None:
 
     # Response mapping: only the text block survives; the thinking block is dropped.
     assert result == cassette["expected_text"]
-    # Request shape: current model, the system prompt, and the user-role prompt.
-    assert captured["model"] == "claude-opus-4-8"
+    # Request shape: current default model, the system prompt, and the user-role prompt.
+    assert captured["model"] == "claude-sonnet-4-6"
     assert captured["system"] == _SYSTEM
     assert captured["messages"] == [{"role": "user", "content": cassette["request"]["prompt"]}]

@@ -1,7 +1,8 @@
 """Anthropic LlmClient adapter: equation glosses and table summaries via Claude.
 
-Talks to Claude through the official anthropic SDK using the current model
-(claude-opus-4-8). The SDK handles retries and backoff (429, 5xx, connection
+Talks to Claude through the official anthropic SDK. The model is injected (Config.llm_model,
+default claude-sonnet-4-6; pass --llm-model claude-opus-4-8 for pricier, most-capable runs).
+The SDK handles retries and backoff (429, 5xx, connection
 errors), so the domain stays pure and retry-free. The SDK is imported lazily, so
 the package stays importable without it and so the autouse cost guard can patch
 `complete` to fail any non-live test that reaches the real LLM. The response
@@ -16,7 +17,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Any
 
-_MODEL = "claude-opus-4-8"
+_MODEL = "claude-sonnet-4-6"  # default; the structured stages are classification, not generation
 _SYSTEM = (
     "You convert scientific content into a single, clear spoken sentence for an "
     "audiobook. Say what it means, not how it is typeset. Do not read symbols or "

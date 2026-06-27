@@ -21,7 +21,7 @@ from typing import Any
 
 from thesis_audiobook.ir import StrictModel
 
-AUDITOR_VERSION = "auditor-v2"  # bump invalidates cached verdicts when the prompt changes
+AUDITOR_VERSION = "auditor-v3"  # bump invalidates cached verdicts when the prompt changes
 AUDITOR_SYSTEM = (
     "You audit one audiobook edit. The edit re-renders WRITTEN text - symbols, math notation, "
     "chemical formulas, units, abbreviations - into SPOKEN words. Re-rendering the SAME content "
@@ -39,20 +39,16 @@ AUDITOR_SYSTEM = (
 )
 AUDITOR_MAX_TOKENS = 400
 
-# Two independent framings -> two distinct cached calls per edit. Both must pass.
+# A single auditor (one cached call per edit) that combines the extract-and-compare and skeptic
+# checks. Kept as a list so the panel/caching machinery is unchanged if a second is added back.
 AUDIT_FRAMINGS: list[tuple[str, str]] = [
     (
-        "extract",
-        "List what ORIGINAL denotes (each value, unit, name, and the core claim or relation), "
-        "then what SPOKEN denotes. Are they the SAME content, only re-worded for the ear? It is "
-        "unfaithful only if a value, unit, relation, negation, or named entity actually differs.",
-    ),
-    (
-        "skeptic",
-        "Hunt for a real change of CONTENT, not of form: does SPOKEN state a different value or "
-        "unit, flip a relation or negation, or name a different entity than ORIGINAL? Re-saying "
-        "the same quantity in words (a formula as its name, a symbol as its word) is NOT a "
-        "change. Unfaithful only if WHAT is said changed, not merely HOW.",
+        "audit",
+        "List what ORIGINAL denotes (each value, unit, name, and the core claim or relation) and "
+        "what SPOKEN denotes, then hunt for any real change of CONTENT: a different value or unit, "
+        "a flipped relation or negation, or a different named entity. Re-saying the same quantity "
+        "in words (a formula as its name, a symbol as its word) is NOT a change. Unfaithful only "
+        "if WHAT is said changed, not merely HOW.",
     ),
 ]
 

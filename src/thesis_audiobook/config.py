@@ -96,6 +96,10 @@ def profile_for(name: str) -> Profile:
 class Config(StrictModel):
     profile: Profile = Field(default_factory=committee_profile)
     seed: int = 0
+    # Anthropic model for all LLM stages (cartographer, structurer, curator, repair, auditor,
+    # QC). Sonnet by default - the stages are classification/labelling, not open generation;
+    # override with --llm-model claude-opus-4-8 for the most capable (and pricier) runs.
+    llm_model: str = "claude-sonnet-4-6"
     # Pinned placeholder rate for the dry-run cost estimate. This is NOT live
     # ElevenLabs pricing; set it from your plan's per-character rate.
     usd_per_character: float = 0.00003
