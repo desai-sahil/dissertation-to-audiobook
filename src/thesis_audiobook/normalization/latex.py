@@ -141,6 +141,16 @@ _TAG_DROP = re.compile(r"</?(?:b|i|em|strong|ol|ul|li|span)>", re.IGNORECASE)
 # Marker-fragmented decimal like "8.<sup>314</sup>") is kept, while one after a word (a
 # citation marker) is dropped. Without this, "8.314" -> "8." and "10^5" -> "10".
 _SUP = re.compile(r"(?P<pre>[0-9.]?)<sup>(?P<body>.*?)</sup>", re.IGNORECASE | re.DOTALL)
+# Chemical formulas Marker mis-typesets with a superscript where the digit is really a
+# subscript ("CO<sup>2</sup>" -> "CO squared"). Fix the few unambiguous gas-exchange molecules
+# before the generic superscript handler so they read as the formula (then the lexicon spells
+# "CO2" as "C O two"). Unit exponents like "m<sup>2</sup>" -> "m squared" are untouched.
+_CHEM_SUP = [
+    (re.compile(r"\bH<sup>2</sup>O<sup>2</sup>", re.IGNORECASE), "H2O2"),
+    (re.compile(r"\bH<sup>2</sup>O\b", re.IGNORECASE), "H2O"),
+    (re.compile(r"\bCO<sup>2</sup>", re.IGNORECASE), "CO2"),
+    (re.compile(r"\bO<sup>2</sup>", re.IGNORECASE), "O2"),
+]
 _SUB = re.compile(r"<sub>(?P<body>.*?)</sub>", re.IGNORECASE | re.DOTALL)
 _BR = re.compile(r"<br\s*/?>", re.IGNORECASE)
 _WRAPPER_CMD = re.compile(r"\\(?:rm|text|mathrm|mathbf|mathit|mathcal|operatorname|left|right)\b")
@@ -194,6 +204,8 @@ def clean_markup(text: str) -> str:
     if not any(ch in text for ch in _MARKUP_TRIGGER):
         return text
     text = _BR.sub(" ", text)
+    for chem, plain in _CHEM_SUP:
+        text = chem.sub(plain, text)
     text = _SUP.sub(_script_repl_html, text)
     text = _SUB.sub(lambda m: f" {m.group('body')}" if m.group("body").strip() else "", text)
     text = _TAG_DROP.sub("", text)

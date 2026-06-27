@@ -114,6 +114,16 @@ def test_clean_markup_unicode_math_glyphs() -> None:
     assert "−" not in clean_markup("a − b") and "minus" in clean_markup("a − b")
 
 
+def test_clean_markup_chemical_formula_superscripts() -> None:
+    # Marker mis-typesets CO2 etc. with a superscript; read as the formula, not "CO squared".
+    assert clean_markup("the CO<sup>2</sup> rate") == "the CO2 rate"
+    assert clean_markup("flux of O<sup>2</sup>") == "flux of O2"
+    assert clean_markup("a drop of H<sup>2</sup>O here") == "a drop of H2O here"
+    # a genuine unit exponent is still spoken as squared/cubed
+    assert clean_markup("area m<sup>2</sup> wide") == "area m squared wide"
+    assert "cubed" in clean_markup("volume cm<sup>3</sup>")
+
+
 def test_clean_markup_never_leaks_latex_or_tags() -> None:
     messy = r"$E=4.2\times10^{-5}~{\rm kg/(m^2.s)}$ and $\mu m$ scale<sup>3</sup>"
     out = clean_markup(messy)

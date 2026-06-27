@@ -32,7 +32,14 @@ def test_normalize_ligatures() -> None:
 
 @pytest.mark.parametrize(
     "raw,joined",
-    [("g s", "gs"), ("g s /goxz", "gs /goxz"), ("H2 O2", "H2O2"), ("V PD", "VPD")],
+    [
+        ("g s", "gs"),
+        ("g s /goxz", "gs /goxz"),
+        ("H2 O2", "H2O2"),
+        ("V PD", "VPD"),
+        ("hosted by OZX", "hosted by OXZ"),  # transposition of the author's own "OXZ"
+        ("OZXylem", "OZXylem"),  # word-bounded: not touched mid-word
+    ],
 )
 def test_rejoin_split_tokens(raw: str, joined: str) -> None:
     assert rejoin_split_tokens(raw) == joined

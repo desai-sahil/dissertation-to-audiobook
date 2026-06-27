@@ -61,6 +61,7 @@ _REJOIN: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\bV\s+PD\b"), "VPD"),
     (re.compile(r"ψ\s+xyl"), "ψ_xyl"),
     (re.compile(r"ψ\s+ssc"), "ψ_ssc"),
+    (re.compile(r"\bOZX\b"), "OXZ"),  # a transposition of the author's own "OXZ" (1x vs 100x)
 ]
 
 _SPILLOVER_START = re.compile(r"(and|with|or|of|the|for|to|in|via)\b", re.IGNORECASE)
