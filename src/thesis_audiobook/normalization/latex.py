@@ -110,6 +110,8 @@ _UNICODE_MATH = {
     "≫": " much greater than ",  # ≫
     "≤": " less than or equal to ",  # ≤
     "≥": " greater than or equal to ",  # ≥
+    "≲": " less than or approximately ",  # ≲
+    "≳": " greater than or approximately ",  # ≳
     "≠": " not equal to ",  # ≠
     "∝": " proportional to ",  # ∝
     "±": " plus or minus ",  # ±

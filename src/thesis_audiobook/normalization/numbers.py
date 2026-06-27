@@ -134,6 +134,9 @@ def handle_negatives(text: str) -> str:
 
 
 def handle_percent(text: str) -> str:
+    # Space after only when a word follows, so "%RH" reads "percent RH" (not "percentRH")
+    # while "37%" stays "thirty-seven percent".
+    text = re.sub(r"%(?=[A-Za-z0-9])", " percent ", text)
     return text.replace("%", " percent")
 
 

@@ -94,6 +94,25 @@ def test_apply_plan_single_pass_no_reexpansion() -> None:
     assert apply_plan(["We used ABA today."], plan2) == ["We used abscisic acid (A B A) today."]
 
 
+def test_apply_plan_skips_single_letter_and_greek_keys() -> None:
+    # Single-letter symbols (E, A) collide with middle initials and the article "A"; a bare
+    # Greek-letter name (zeta) is overloaded. Neither is expanded in prose.
+    plan = parse_plan(
+        '{"acronyms":[{"acronym":"E","first_use":"transpiration rate","short_form":"E"},'
+        '{"acronym":"A","first_use":"assimilation rate","short_form":"A"}],'
+        '"notation":[{"written":"zeta","spoken":"relative FRET efficiency"},'
+        '{"written":"psi xyl","spoken":"xylem water potential"}]}'
+    )
+    out = apply_plan(
+        ["Annika E. Huber gave guidance.", "A hearty thanks; zeta rose as psi xyl fell."], plan
+    )
+    assert out[0] == "Annika E. Huber gave guidance."  # middle initial untouched
+    assert "transpiration rate" not in out[0]
+    assert out[1].startswith("A hearty thanks")  # article untouched
+    assert "zeta rose" in out[1] and "relative FRET" not in out[1]  # greek name kept
+    assert "xylem water potential" in out[1]  # multi-word notation still expands
+
+
 def test_apply_plan_dehyphenates() -> None:
     plan = parse_plan(
         '{"dehyphenations":[{"broken":"me-asurable","fixed":"measurable"},'

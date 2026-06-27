@@ -108,6 +108,48 @@ def parse_plan(raw: str) -> PronunciationPlan:
 _BOUNDARY = r"(?<![A-Za-z0-9]){}(?![A-Za-z0-9])"
 
 
+# Bare Greek-letter names are overloaded across a thesis (zeta is "activity coefficient" in the
+# crystallization chapter but the curator may map it to one domain term like "relative FRET
+# efficiency"). Left alone, they read as the letter name, which is always correct.
+_GREEK_NAMES = frozenset(
+    [
+        "alpha",
+        "beta",
+        "gamma",
+        "delta",
+        "epsilon",
+        "zeta",
+        "eta",
+        "theta",
+        "iota",
+        "kappa",
+        "lambda",
+        "mu",
+        "nu",
+        "xi",
+        "omicron",
+        "pi",
+        "rho",
+        "sigma",
+        "tau",
+        "upsilon",
+        "phi",
+        "chi",
+        "psi",
+        "omega",
+    ]
+)
+
+
+def _too_ambiguous(key: str) -> bool:
+    """A key too ambiguous to expand in running prose. A single letter (E, A, R, or a lone Greek
+    symbol) collides with middle initials ("Annika E. Huber"), the article "A", the pronoun "I",
+    and list labels; a bare Greek-letter name is overloaded across chapters. Both fall through to
+    the Greek/number normalizer, which reads them as the letter."""
+    stripped = key.strip()
+    return (len(stripped) == 1 and stripped.isalpha()) or stripped.lower() in _GREEK_NAMES
+
+
 def _key(text: str) -> str:
     return re.sub(r"[\s-]+", " ", text).strip().lower()
 
@@ -124,17 +166,17 @@ def apply_plan(texts: list[str], plan: PronunciationPlan) -> list[str]:
     """
     plain: dict[str, str] = {}
     for notation in plan.notation:
-        if notation.written.strip():
+        if notation.written.strip() and not _too_ambiguous(notation.written):
             plain.setdefault(notation.written, notation.spoken)
     for term in plan.terms:
-        if term.term.strip():
+        if term.term.strip() and not _too_ambiguous(term.term):
             plain.setdefault(term.term, term.spoken)
     for fix in plan.dehyphenations:
         if fix.broken.strip():
             plain.setdefault(fix.broken, fix.fixed)
     acronyms: dict[str, AcronymRule] = {}
     for rule in plan.acronyms:
-        if rule.acronym.strip() and rule.acronym not in plain:
+        if rule.acronym.strip() and not _too_ambiguous(rule.acronym) and rule.acronym not in plain:
             acronyms.setdefault(rule.acronym, rule)
 
     keys = sorted([*plain, *acronyms], key=len, reverse=True)
