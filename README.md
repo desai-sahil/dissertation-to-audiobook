@@ -107,12 +107,22 @@ open out/<slug>.script.md          # the reviewable spoken script
 open out/<slug>.structure.md       # the cartographer's keep/skip decisions
 ```
 
-Before the artifacts are written, a **guarded auto-repair** runs: Opus proposes small
-find/replace pronunciation fixes, and only the ones that pass a no-fabrication guard are
-applied (it may change *how* text sounds, e.g. "CO squared" → "carbon dioxide", but may
-never introduce a number, year, or name the model can't verify — those go to human review).
-The applied/rejected list lands at `out/<slug>.script-repair.md`. Disable with
-`--no-script-repair`.
+Before the artifacts are written, a **guarded auto-repair loop** runs (a generator-verifier
+loop). Each round: a *writer* (Opus) proposes small find/replace pronunciation fixes; each
+must clear **two independent safety layers** before it is applied —
+
+1. a **deterministic no-fabrication guard** (the replacement may add no number, year, or
+   name absent from the text it replaces), and
+2. an independent **auditor panel** — two adversarial Opus calls, each grounded only on the
+   original span and the proposed output, both must vote *faithful* (fail-closed). The panel
+   catches what the guard cannot: a flipped claim or relation ("increased" → "decreased")
+   that adds no new number or name.
+
+Survivors are applied, the script is re-read, and the loop repeats until a round verifies
+nothing (convergence). So the writer gets broad latitude to *change how text sounds* and
+zero latitude to *invent facts*. Every call is cached (deterministic, cheap to re-run); the
+applied/rejected list lands at `out/<slug>.script-repair.md`. Disable with `--no-script-repair`.
+The auditor is red-teamed against planted fabrications in the `live` test suite.
 
 ### Phase 4 — Pre-TTS script QC gate
 

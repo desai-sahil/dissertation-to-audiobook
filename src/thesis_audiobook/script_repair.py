@@ -200,6 +200,42 @@ def apply_script_repairs(
     return applied, rejected
 
 
+def candidate_repairs(
+    script_text: str, repairs: list[ScriptRepair]
+) -> tuple[list[ScriptRepair], list[RejectedRepair]]:
+    """Filter proposed repairs to those that pass the deterministic guard AND whose anchor is a
+    verbatim substring of the script. Returns (candidates, rejected). Candidates still must clear
+    the faithfulness auditors before they are applied; this is just the deterministic floor."""
+    candidates: list[ScriptRepair] = []
+    rejected: list[RejectedRepair] = []
+    for edit in sorted(repairs, key=lambda e: len(e.find), reverse=True):
+        if not is_safe_script_repair(edit.find, edit.replace):
+            rejected.append(
+                RejectedRepair(
+                    find=edit.find,
+                    replace=edit.replace,
+                    why="guard: would fabricate content (number, year, or name) or span too large",
+                )
+            )
+        elif edit.find not in script_text:
+            rejected.append(
+                RejectedRepair(find=edit.find, replace=edit.replace, why="not found in script")
+            )
+        else:
+            candidates.append(edit)
+    return candidates, rejected
+
+
+def apply_one(chunks: list[Chunk], edit: ScriptRepair) -> int:
+    """Apply one edit to the chunk texts in place (all occurrences); returns the count. Editing
+    chunks (not the flat script) preserves each chunk's block_ids, so provenance survives."""
+    count = sum(chunk.text.count(edit.find) for chunk in chunks)
+    for chunk in chunks:
+        if edit.find in chunk.text:
+            chunk.text = chunk.text.replace(edit.find, edit.replace)
+    return count
+
+
 def build_script_repair_prompt(script: str) -> str:
     return (
         "Below is the FINAL audiobook narration script generated from a scientific thesis. "

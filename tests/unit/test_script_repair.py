@@ -24,14 +24,22 @@ _PLAN = (
 )
 
 
-class _FakeLlm:
-    def __init__(self, response: str) -> None:
-        self.response = response
-        self.calls = 0
+class _ScriptedLlm:
+    """Prompt-aware fake: returns the writer plan for the writer prompt and a fixed auditor verdict
+    for the auditor prompt (the stage now makes both kinds of call)."""
+
+    def __init__(self, plan_json: str, verdict_json: str = '{"faithful": true}') -> None:
+        self.plan_json = plan_json
+        self.verdict_json = verdict_json
+        self.writer_calls = 0
+        self.audit_calls = 0
 
     def complete(self, prompt: str, *, system: str | None = None, max_tokens: int | None = None):
-        self.calls += 1
-        return self.response
+        if "ORIGINAL:" in prompt and "SPOKEN:" in prompt:  # the auditor prompt
+            self.audit_calls += 1
+            return self.verdict_json
+        self.writer_calls += 1
+        return self.plan_json
 
 
 @pytest.mark.parametrize(
@@ -93,36 +101,53 @@ def test_stage_mock_is_noop(tiny_ir_path: Path) -> None:
     assert ctx.script_repair_applied == []
 
 
-def test_stage_applies_safe_repairs_and_caches(tiny_ir_path: Path) -> None:
+def _doc() -> Document:
+    text = "the CO squared rate per Buckley and Mott"
+    return Document(
+        meta=DocumentMeta(title="t"),
+        script=text,
+        chunks=[Chunk(id="c1", text=text, block_ids=["b"])],
+    )
+
+
+def test_stage_applies_safe_when_auditor_passes_and_caches(tiny_ir_path: Path) -> None:
     ctx = build_mock_context(Config(), pdf_bytes=b"x", mock_ir=tiny_ir_path)
-    fake = _FakeLlm(_PLAN)
+    fake = _ScriptedLlm(_PLAN, verdict_json='{"faithful": true}')
     ctx.llm = fake
 
-    def fresh() -> Document:
-        return Document(
-            meta=DocumentMeta(title="t"),
-            script="the CO squared rate per Buckley and Mott",
-            chunks=[
-                Chunk(id="c1", text="the CO squared rate per Buckley and Mott", block_ids=["b"])
-            ],
-        )
-
-    doc = ScriptRepairStage().run(fresh(), ctx)
+    doc = ScriptRepairStage().run(_doc(), ctx)
+    # the safe edit passes guard + auditor and applies; the fabrication is guard-rejected
     assert "carbon dioxide" in (doc.script or "") and "CO squared" not in (doc.script or "")
-    assert "Buckley and Mott" in (doc.script or "")  # fabrication left in place
-    assert len(ctx.script_repair_applied) == 1 and len(ctx.script_repair_rejected) == 1
-    ScriptRepairStage().run(fresh(), ctx)  # same script -> cached, no second call
-    assert fake.calls == 1
+    assert "Buckley and Mott" in (doc.script or "")
+    assert len(ctx.script_repair_applied) == 1
+    assert any("Buckley" in r.find for r in ctx.script_repair_rejected)
+    calls_after_first = (fake.writer_calls, fake.audit_calls)
+    ScriptRepairStage().run(_doc(), ctx)  # identical input -> every call cache-hits
+    assert (fake.writer_calls, fake.audit_calls) == calls_after_first
+
+
+def test_stage_auditor_vetoes_a_guard_passing_edit(tiny_ir_path: Path) -> None:
+    # A claim flip ("increased" -> "decreased") adds no number/name, so the deterministic guard
+    # passes it - but it changes meaning, so the auditor panel must veto it (fail-closed).
+    plan = '{"repairs":[{"find":"the value increased","replace":"the value decreased"}]}'
+    ctx = build_mock_context(Config(), pdf_bytes=b"x", mock_ir=tiny_ir_path)
+    ctx.llm = _ScriptedLlm(plan, verdict_json='{"faithful": false, "reason": "claim flipped"}')
+    doc = Document(
+        meta=DocumentMeta(title="t"),
+        script="we found the value increased here",
+        chunks=[Chunk(id="c1", text="we found the value increased here", block_ids=["b"])],
+    )
+    ScriptRepairStage().run(doc, ctx)
+    assert doc.script == "we found the value increased here"  # NOT applied
+    assert ctx.script_repair_applied == []
+    assert any(r.why.startswith("auditor:") for r in ctx.script_repair_rejected)
 
 
 def test_stage_disabled_skips(tiny_ir_path: Path) -> None:
     ctx = build_mock_context(Config(script_repair=False), pdf_bytes=b"x", mock_ir=tiny_ir_path)
-    fake = _FakeLlm(_PLAN)
+    fake = _ScriptedLlm(_PLAN)
     ctx.llm = fake
-    doc = Document(
-        meta=DocumentMeta(title="t"),
-        script="the CO squared rate",
-        chunks=[Chunk(id="c1", text="the CO squared rate", block_ids=["b1"])],
-    )
+    doc = _doc()
     ScriptRepairStage().run(doc, ctx)
-    assert fake.calls == 0 and doc.script == "the CO squared rate"
+    assert fake.writer_calls == 0 and fake.audit_calls == 0
+    assert doc.script == "the CO squared rate per Buckley and Mott"
