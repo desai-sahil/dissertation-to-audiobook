@@ -24,6 +24,7 @@ from thesis_audiobook.ports.pronunciation import PronunciationPublisher
 from thesis_audiobook.ports.tts import TtsClient
 from thesis_audiobook.pronunciation import DictionaryLocator, PronunciationLexicon
 from thesis_audiobook.provenance import ProvenanceMap
+from thesis_audiobook.script_qc import ScriptQcReport
 from thesis_audiobook.warnings import WarningsSink
 
 
@@ -65,6 +66,7 @@ class Context:
     pdf_bytes: bytes = b""
     cover_image: bytes | None = None
     structure_map: StructureMap | None = None
+    script_qc_report: ScriptQcReport | None = None
     pronunciation_plan: PronunciationPlan | None = None
     dictionary_locators: list[DictionaryLocator] = field(default_factory=_new_locators)
     rendered: dict[str, bytes] = field(default_factory=_new_byte_map)

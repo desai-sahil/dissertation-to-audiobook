@@ -45,6 +45,7 @@ from thesis_audiobook.extraction_repair import (
 )
 from thesis_audiobook.ir import Chunk, Document, DocumentMeta, StructureMap
 from thesis_audiobook.linkage import citation_linkage
+from thesis_audiobook.script_qc import ScriptQcReport, render_script_qc_md
 from thesis_audiobook.stages import build_default_pipeline
 from thesis_audiobook.stages.assemble_audio import slugify
 
@@ -230,6 +231,15 @@ def run(
             help="Skip the LLM thesis cartographer (front/back matter + appendix detection).",
         ),
     ] = False,
+    no_script_qc: Annotated[
+        bool, typer.Option("--no-script-qc", help="Skip the phase-4 pre-TTS script QC check.")
+    ] = False,
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force", help="Render even if the phase-4 QC finds high-severity red flags."
+        ),
+    ] = False,
     seed: Annotated[int, typer.Option(help="Determinism seed.")] = 0,
     out: Annotated[Path, typer.Option(help="Output directory.")] = Path("out"),
     cache_dir: Annotated[Path, typer.Option(help="Content-addressed TTS cache directory.")] = Path(
@@ -258,6 +268,7 @@ def run(
         output_mode=_validate_format(audio_format),
         curate=not no_curate,
         structure_eval=not no_structure_eval,
+        script_qc=not no_script_qc,
     )
     if markdown is not None:
         if not markdown.exists():
@@ -327,18 +338,14 @@ def run(
     cover_bytes, cover_note = _resolve_cover(cover)
     ctx.cover_image = cover_bytes
 
+    _unavailable = (AnthropicUnavailableError, ElevenLabsUnavailableError, FfmpegUnavailableError)
+
+    # Phase 3: prepare the narration script (build IR -> structure -> select -> gloss ->
+    # citations -> normalize -> assemble_script). Artifacts are written before any TTS spend.
+    typer.echo("Phase 3: preparing the narration script ...")
     try:
-        if preview:
-            doc = pipeline.run(seed_doc, ctx, to="lexicon")
-            doc.chunks = preview_chunks(doc.chunks)
-            doc = pipeline.run(doc, ctx, frm="tts")
-        else:
-            doc = pipeline.run(seed_doc, ctx)
-    except (
-        AnthropicUnavailableError,
-        ElevenLabsUnavailableError,
-        FfmpegUnavailableError,
-    ) as error:
+        doc = pipeline.run(seed_doc, ctx, to="assemble_script")
+    except _unavailable as error:
         typer.echo(f"error: {error}", err=True)
         raise typer.Exit(code=2) from error
 
@@ -347,6 +354,45 @@ def run(
     structure_path = _write_structure_md(
         out, doc, ctx.structure_map, include_appendices=config.profile.include_appendices
     )
+
+    # Phase 4: pre-TTS QC. Audit the finished script for red flags BEFORE any ElevenLabs spend.
+    typer.echo("Phase 4: pre-TTS quality check ...")
+    try:
+        doc = pipeline.run(doc, ctx, frm="script_qc", to="script_qc")
+    except _unavailable as error:
+        typer.echo(f"error: {error}", err=True)
+        raise typer.Exit(code=2) from error
+    qc_report = ctx.script_qc_report or ScriptQcReport()
+    script_qc_path = out / f"{slug}.script-qc.md"
+    script_qc_path.write_text(render_script_qc_md(qc_report), encoding="utf-8")
+    high_flags = qc_report.high_severity()
+    if high_flags:
+        typer.echo(
+            f"  {len(high_flags)} HIGH-severity red flag(s) - see {script_qc_path}:", err=True
+        )
+        for issue in high_flags[:5]:
+            typer.echo(f"    - {issue.kind}: {issue.detail}", err=True)
+        if use_real_tts and not force:
+            typer.echo(
+                "  Stopping before the ElevenLabs render (phase-4 gate). Fix the script (or the "
+                "markdown) and re-run, or pass --force to render anyway.",
+                err=True,
+            )
+            raise typer.Exit(code=3)
+
+    # Phase 5: render + assembly (ElevenLabs TTS + ffmpeg mux, or mock stand-ins).
+    typer.echo(f"Phase 5: {'ElevenLabs render' if use_real_tts else 'mock render'} + assembly ...")
+    try:
+        if preview:
+            doc = pipeline.run(doc, ctx, frm="lexicon", to="lexicon")
+            doc.chunks = preview_chunks(doc.chunks)
+            doc = pipeline.run(doc, ctx, frm="tts")
+        else:
+            doc = pipeline.run(doc, ctx, frm="lexicon")
+    except _unavailable as error:
+        typer.echo(f"error: {error}", err=True)
+        raise typer.Exit(code=2) from error
+
     audio_paths: list[Path] = []
     for blob in ctx.audio_outputs:
         path = out / blob.filename
@@ -373,6 +419,10 @@ def run(
     typer.echo(f"  script chars      : {estimate.characters}")
     typer.echo(f"  reviewable script : {script_path}  (Gate B artifact)")
     typer.echo(f"  structure map     : {structure_path}  (Gate A artifact)")
+    typer.echo(
+        f"  pre-TTS QC        : {script_qc_path}  ({len(qc_report.issues)} flags, "
+        f"{len(high_flags)} high)"
+    )
     typer.echo(f"  chunk plan        : {chunks_path}")
     typer.echo(f"  {audio_label:<18}: {audio_list} ({total_bytes} bytes)")
     typer.echo(f"  cover             : {cover_note}")

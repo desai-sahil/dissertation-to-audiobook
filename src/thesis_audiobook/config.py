@@ -106,6 +106,8 @@ class Config(StrictModel):
     # LLM thesis cartographer (structure map: include/skip regions). On by default;
     # --no-structure-eval disables it (then the build_ir heuristics stand alone).
     structure_eval: bool = True
+    # Phase-4 pre-TTS script QC (red-flag check before ElevenLabs). On by default.
+    script_qc: bool = True
     # Audio assembly: a single M4B with chapter markers, or flat per-chapter MP3s.
     output_mode: OutputMode = "m4b"
     narrator: str = "Audiobook narrator"
