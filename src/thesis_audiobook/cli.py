@@ -33,6 +33,16 @@ from thesis_audiobook.extraction_qc import (
     parse_qc,
     render_qc_md,
 )
+from thesis_audiobook.extraction_repair import (
+    EXTRACTION_REPAIR_MAX_TOKENS,
+    EXTRACTION_REPAIR_SYSTEM,
+    EXTRACTION_REPAIR_VERSION,
+    ExtractionRepairPlan,
+    apply_repairs,
+    build_repair_prompt,
+    parse_repair_plan,
+    render_repair_report,
+)
 from thesis_audiobook.ir import Chunk, Document, DocumentMeta, StructureMap
 from thesis_audiobook.linkage import citation_linkage
 from thesis_audiobook.stages import build_default_pipeline
@@ -479,6 +489,84 @@ def check_extraction(
     typer.echo(f"  report   : {report_path}")
     if not use_real_llm:
         typer.echo("  (mock LLM did no real audit; pass --llm anthropic for the Opus review)")
+
+
+def _run_extraction_repair(markdown: str, ctx: Context) -> ExtractionRepairPlan:
+    """Pass 1: one cached LLM call proposing guarded repair edits + non-fixable flags."""
+    digest = hashlib.sha256(markdown.encode("utf-8")).hexdigest()
+    key = (
+        "extrepair."
+        + hashlib.sha256(
+            f"{EXTRACTION_REPAIR_VERSION}\n{type(ctx.llm).__name__}\n{digest}".encode()
+        ).hexdigest()
+    )
+    cached = ctx.cache.get(key)
+    if cached is not None:
+        return parse_repair_plan(cached.decode("utf-8"))
+    plan = parse_repair_plan(
+        ctx.llm.complete(
+            build_repair_prompt(markdown),
+            system=EXTRACTION_REPAIR_SYSTEM,
+            max_tokens=EXTRACTION_REPAIR_MAX_TOKENS,
+        )
+    )
+    if not plan.is_empty():
+        ctx.cache.put(key, plan.model_dump_json().encode("utf-8"))
+    return plan
+
+
+@app.command(name="repair-extraction")
+def repair_extraction(
+    markdown: Annotated[Path, typer.Argument(help="Markdown file from a standalone Marker run.")],
+    llm: Annotated[
+        str, typer.Option("--llm", help="mock (offline no-op) or anthropic (real repair).")
+    ] = "anthropic",
+    out: Annotated[Path, typer.Option(help="Output directory.")] = Path("out"),
+    cache_dir: Annotated[Path, typer.Option(help="Cache directory.")] = Path(".cache/tts"),
+) -> None:
+    """Two-pass, claim-safe repair of a Marker markdown, then a verify read.
+
+    Pass 1: Opus proposes {broken->fixed} edits for typographic/OCR noise; only edits whose
+    letter skeleton is unchanged (core(broken)==core(fixed)) are applied - so content can never
+    change - producing a cleaned markdown. Pass 2: Opus re-reads the cleaned markdown and flags
+    whatever remains. Writes out/<name>.cleaned.md (feed it to `run --markdown`) and
+    out/<name>.repair-report.md. Both LLM calls are cached, so re-runs are free.
+    """
+    if not markdown.exists():
+        typer.echo(f"error: markdown file not found: {markdown}", err=True)
+        raise typer.Exit(code=2)
+    use_real_llm = _validate_llm(llm)
+    if use_real_llm and not os.environ.get("ANTHROPIC_API_KEY"):
+        typer.echo("error: --llm anthropic needs ANTHROPIC_API_KEY set in this shell.", err=True)
+        raise typer.Exit(code=2)
+
+    config = Config(cache_dir=str(cache_dir))
+    ctx = build_context(config, pdf_bytes=b"", log_enabled=False, use_real_llm=use_real_llm)
+
+    source = markdown.read_text(encoding="utf-8")
+    plan = _run_extraction_repair(source, ctx)  # pass 1
+    cleaned, applied, rejected = apply_repairs(source, plan.repairs)
+    verify = _run_extraction_qc(cleaned, ctx)  # pass 2: re-read the cleaned markdown
+
+    out.mkdir(parents=True, exist_ok=True)
+    cleaned_path = out / f"{markdown.stem}.cleaned.md"
+    cleaned_path.write_text(cleaned, encoding="utf-8")
+    report_path = out / f"{markdown.stem}.repair-report.md"
+    report_path.write_text(
+        render_repair_report(plan, applied, rejected, verify.summary, verify.issues),
+        encoding="utf-8",
+    )
+
+    typer.echo("Extraction repair  (two-pass, guarded)")
+    typer.echo(f"  markdown    : {markdown}")
+    typer.echo(f"  backend     : {'anthropic (real)' if use_real_llm else 'mock'}")
+    typer.echo(f"  applied     : {len(applied)} edits")
+    typer.echo(f"  rejected    : {len(rejected)} (guard or not found)")
+    typer.echo(f"  pass-2 flags: {len(verify.issues)} residual")
+    typer.echo(f"  cleaned md  : {cleaned_path}  (feed to: run --markdown {cleaned_path})")
+    typer.echo(f"  report      : {report_path}")
+    if not use_real_llm:
+        typer.echo("  (mock LLM did no real repair; pass --llm anthropic)")
 
 
 def _use_run(verb: str) -> None:
