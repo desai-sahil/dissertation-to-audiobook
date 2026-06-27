@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from thesis_audiobook.bootstrap import build_mock_context
 from thesis_audiobook.config import Config
 from thesis_audiobook.ir import Block, BlockType, Document, DocumentMeta
@@ -10,11 +12,7 @@ from thesis_audiobook.structurer import (
     apply_structure,
     build_outline,
     parse_structure_plan,
-)
-
-_PLAN = (
-    '{"labels":[{"id":"m1","kind":"prose"},{"id":"m2","kind":"code"},'
-    '{"id":"m3","kind":"reference"},{"id":"m4","kind":"boguskind"}]}'
+    suspicious_blocks,
 )
 
 
@@ -28,65 +26,114 @@ class _FakeLlm:
         return self.response
 
 
-def _blocks() -> list[Block]:
-    return [
-        Block(id="m1", type=BlockType.paragraph, text="A normal sentence of prose."),
-        Block(id="m2", type=BlockType.paragraph, text="i m p o rt p a n d a s a s pd"),
-        Block(id="m3", type=BlockType.paragraph, text="Smith, J. A title. Journal, 2019."),
-        Block(id="m4", type=BlockType.paragraph, text="Another paragraph."),
+@pytest.mark.parametrize(
+    "text,suspicious",
+    [
+        # code-like -> triaged to the model
+        ("i m p o rt p a n d a s a s pd", True),  # parser-shredded code
+        ("import numpy as np", True),
+        ("plt.figure(figsize=(6, 4))", True),
+        ("def calibrate(data):", True),
+        ("result = compute(x)", True),
+        ("```python", True),
+        ("S e r i e s C r e at e d by S h o r t Cut", True),  # spaced garble
+        # genuine prose -> never sent
+        ("The stomata regulate transpiration under drought stress.", False),
+        ("We measured 5 ml of 0.1 M NaCl at 25 C for 30 minutes.", False),
+        ("As shown in Figure 1.1, the gradient steepens toward the tip.", False),
+    ],
+)
+def test_triage_flags_code_not_prose(text: str, suspicious: bool) -> None:
+    block = Block(id="b", type=BlockType.paragraph, text=text)
+    assert bool(suspicious_blocks([block])) is suspicious
+
+
+def test_triage_only_considers_paragraphs() -> None:
+    # a heading/reference already typed by the cheap pass is trusted, not re-sent
+    blocks = [
+        Block(id="h", type=BlockType.heading, text="import of water across the membrane"),
+        Block(id="p", type=BlockType.paragraph, text="def f(): return 1"),
     ]
-
-
-def test_outline_lists_every_block_with_id_and_type() -> None:
-    outline = build_outline(_blocks())
-    assert "m2 | paragraph | i m p o rt" in outline
-    assert outline.count("\n") == 3  # one line per block
+    assert [b.id for b in suspicious_blocks(blocks)] == ["p"]
 
 
 def test_parse_handles_garbage() -> None:
     assert parse_structure_plan("not json").is_empty()
-    assert len(parse_structure_plan(f"```json\n{_PLAN}\n```").labels) == 4
+    plan = parse_structure_plan('{"labels":[{"id":"m2","kind":"code"}]}')
+    assert len(plan.labels) == 1
 
 
 def test_apply_sets_types_logs_changes_and_ignores_unknowns() -> None:
-    blocks = _blocks()
-    changes = apply_structure(blocks, parse_structure_plan(_PLAN))
+    blocks = [
+        Block(id="m1", type=BlockType.paragraph, text="prose"),
+        Block(id="m2", type=BlockType.paragraph, text="i m p o rt"),
+        Block(id="m3", type=BlockType.paragraph, text="ref"),
+    ]
+    plan = parse_structure_plan(
+        '{"labels":[{"id":"m2","kind":"code"},{"id":"m3","kind":"reference"},'
+        '{"id":"m1","kind":"boguskind"},{"id":"absent","kind":"code"}]}'
+    )
+    changes = apply_structure(blocks, plan)
     kinds = {b.id: b.type for b in blocks}
-    assert kinds["m1"] is BlockType.paragraph  # unchanged (already prose)
-    assert kinds["m2"] is BlockType.code  # spaced-out code reclassified
-    assert kinds["m3"] is BlockType.reference_list
-    assert kinds["m4"] is BlockType.paragraph  # unknown kind ignored, left as-is
-    # the change log records only the two real reclassifications, with provenance
-    assert {c.id for c in changes} == {"m2", "m3"}
-    m2 = next(c for c in changes if c.id == "m2")
-    assert m2.from_type == "paragraph" and m2.to_type == "code"
+    assert kinds["m2"] is BlockType.code and kinds["m3"] is BlockType.reference_list
+    assert kinds["m1"] is BlockType.paragraph  # unknown kind ignored
+    assert {c.id for c in changes} == {"m2", "m3"}  # only real changes logged; absent id skipped
+
+
+def _doc_with_code() -> Document:
+    return Document(
+        meta=DocumentMeta(title="t"),
+        blocks=[
+            Block(id="m1", type=BlockType.paragraph, text="A clean sentence of body prose here."),
+            Block(id="m2", type=BlockType.paragraph, text="i m p o rt p a n d a s a s pd"),
+        ],
+    )
+
+
+def test_stage_sends_only_suspects_and_reclassifies(tiny_ir_path: Path) -> None:
+    ctx = build_mock_context(Config(), pdf_bytes=b"x", mock_ir=tiny_ir_path)
+    fake = _FakeLlm('{"labels":[{"id":"m2","kind":"code"}]}')
+    ctx.llm = fake
+    doc = _doc_with_code()
+    StructurerStage().run(doc, ctx)
+    kinds = {b.id: b.type for b in doc.blocks}
+    assert kinds["m2"] is BlockType.code and kinds["m1"] is BlockType.paragraph
+    assert len(ctx.reclassifications) == 1
+    assert any("reclassified" in w.reason for w in ctx.warnings.items)
+    StructurerStage().run(_doc_with_code(), ctx)  # same suspects -> cached
+    assert fake.calls == 1
+
+
+def test_stage_no_suspects_makes_no_llm_call(tiny_ir_path: Path) -> None:
+    ctx = build_mock_context(Config(), pdf_bytes=b"x", mock_ir=tiny_ir_path)
+    fake = _FakeLlm('{"labels":[{"id":"m1","kind":"code"}]}')
+    ctx.llm = fake
+    doc = Document(
+        meta=DocumentMeta(title="t"),
+        blocks=[Block(id="m1", type=BlockType.paragraph, text="All clean prose, nothing unusual.")],
+    )
+    StructurerStage().run(doc, ctx)
+    assert fake.calls == 0  # nothing suspicious -> the model is never called
+    assert doc.blocks[0].type is BlockType.paragraph and ctx.reclassifications == []
 
 
 def test_stage_mock_is_noop(tiny_ir_path: Path) -> None:
     ctx = build_mock_context(Config(), pdf_bytes=b"x", mock_ir=tiny_ir_path)
-    doc = Document(meta=DocumentMeta(title="t"), blocks=_blocks())
-    StructurerStage().run(doc, ctx)
-    assert all(b.type is BlockType.paragraph for b in doc.blocks)  # mock -> empty -> no change
+    doc = _doc_with_code()
+    StructurerStage().run(doc, ctx)  # suspect exists, but mock LLM -> empty plan -> no change
+    assert all(b.type is BlockType.paragraph for b in doc.blocks)
     assert ctx.reclassifications == []
-
-
-def test_stage_applies_and_caches(tiny_ir_path: Path) -> None:
-    ctx = build_mock_context(Config(), pdf_bytes=b"x", mock_ir=tiny_ir_path)
-    fake = _FakeLlm(_PLAN)
-    ctx.llm = fake
-    doc = Document(meta=DocumentMeta(title="t"), blocks=_blocks())
-    StructurerStage().run(doc, ctx)
-    assert next(b for b in doc.blocks if b.id == "m2").type is BlockType.code
-    assert len(ctx.reclassifications) == 2
-    assert any("reclassified" in w.reason for w in ctx.warnings.items)
-    StructurerStage().run(Document(meta=DocumentMeta(title="t"), blocks=_blocks()), ctx)
-    assert fake.calls == 1  # same blocks -> cached, no second call
 
 
 def test_stage_disabled_skips(tiny_ir_path: Path) -> None:
     ctx = build_mock_context(Config(structurer=False), pdf_bytes=b"x", mock_ir=tiny_ir_path)
-    fake = _FakeLlm(_PLAN)
+    fake = _FakeLlm('{"labels":[{"id":"m2","kind":"code"}]}')
     ctx.llm = fake
-    doc = Document(meta=DocumentMeta(title="t"), blocks=_blocks())
+    doc = _doc_with_code()
     StructurerStage().run(doc, ctx)
     assert fake.calls == 0 and all(b.type is BlockType.paragraph for b in doc.blocks)
+
+
+def test_outline_uses_block_ids_and_types() -> None:
+    outline = build_outline(_doc_with_code().blocks)
+    assert "m2 | paragraph | i m p o rt" in outline and outline.count("\n") == 1

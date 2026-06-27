@@ -13,7 +13,7 @@ from __future__ import annotations
 import hashlib
 
 from thesis_audiobook.context import Context
-from thesis_audiobook.ir import Document
+from thesis_audiobook.ir import Block, Document
 from thesis_audiobook.structurer import (
     STRUCTURER_MAX_TOKENS,
     STRUCTURER_SYSTEM,
@@ -23,6 +23,7 @@ from thesis_audiobook.structurer import (
     build_outline,
     build_structurer_prompt,
     parse_structure_plan,
+    suspicious_blocks,
 )
 from thesis_audiobook.warnings import LowConfidence
 
@@ -33,7 +34,12 @@ class StructurerStage:
     def run(self, doc: Document, ctx: Context) -> Document:
         if not ctx.config.structurer or not doc.blocks:
             return doc
-        plan = self._plan(doc, ctx)
+        # Triage first: only blocks the cheap pass may have mis-typed are sent to the model.
+        # If nothing looks suspicious, there is no LLM call at all.
+        suspects = suspicious_blocks(doc.blocks)
+        if not suspects:
+            return doc
+        plan = self._plan(suspects, ctx)
         changes = apply_structure(doc.blocks, plan)
         ctx.reclassifications = changes
         for change in changes:
@@ -48,8 +54,8 @@ class StructurerStage:
             ctx.log.info("structurer", reclassified=len(changes))
         return doc
 
-    def _plan(self, doc: Document, ctx: Context) -> StructurePlan:
-        outline = build_outline(doc.blocks)
+    def _plan(self, suspects: list[Block], ctx: Context) -> StructurePlan:
+        outline = build_outline(suspects)
         payload = f"{STRUCTURER_VERSION}\n{type(ctx.llm).__name__}\n{outline}"
         key = "structurer." + hashlib.sha256(payload.encode("utf-8")).hexdigest()
         cached = ctx.cache.get(key)

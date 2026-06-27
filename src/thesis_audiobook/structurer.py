@@ -16,6 +16,7 @@ than have the structure change silently. The cached model call lives in the stag
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from thesis_audiobook.ir import Block, BlockType, StrictModel
@@ -43,7 +44,40 @@ _KIND_TO_TYPE: dict[str, BlockType] = {
     "reference": BlockType.reference_list,
     "frontmatter": BlockType.frontmatter,
 }
-_SNIPPET = 140
+_PROMPT_SNIPPET = 400  # fuller text for the few suspects the model actually sees
+_LOG_SNIPPET = 140  # shorter, for the change log
+
+# General (not per-thesis) signals that a block typed `paragraph` may actually be code or other
+# non-prose the cheap pass missed. Triage flags these for the model; everything else - the
+# confident majority - never reaches it.
+_SPACED_CHARS = re.compile(r"\b\w(?: \w){3,}")  # "i m p o" - parser-shredded characters
+_LIB_CALL = re.compile(
+    r"\b(?:np|pd|plt|os|sys|re|math|sklearn|tf|torch|cv2|json|requests|scipy)\.\w"
+)
+_CODE_TOKENS = re.compile(
+    r"```|def \w+\(|\bimport \w|from \w+ import|print\(|\w+\s*=\s*\w+\(|=>|->|;\s*$|\{\s*\}"
+)
+
+
+def _looks_non_prose(text: str) -> bool:
+    """A general, conservative test that a paragraph might be code/notation rather than prose.
+    Generous on purpose: a false positive only costs one classification; a false negative would
+    let code be read aloud."""
+    if "```" in text or _SPACED_CHARS.search(text) or _LIB_CALL.search(text):
+        return True
+    if _CODE_TOKENS.search(text):
+        return True
+    words = text.split()
+    if len(words) < 4:
+        return False  # too short to judge by ratio; leave it to the deterministic types
+    prose_words = sum(1 for w in words if len(w) >= 2 and any(ch.isalpha() for ch in w))
+    return prose_words / len(words) < 0.5  # symbol/short-token heavy -> likely code or notation
+
+
+def suspicious_blocks(blocks: list[Block]) -> list[Block]:
+    """The subset worth an LLM opinion: paragraph blocks that look like they may be mis-typed.
+    The deterministic types stand for everything else, so the model reads a fraction of the doc."""
+    return [b for b in blocks if b.type is BlockType.paragraph and _looks_non_prose(b.text)]
 
 
 class BlockLabel(StrictModel):
@@ -66,23 +100,23 @@ class Reclassification(StrictModel):
 
 
 def build_outline(blocks: list[Block]) -> str:
-    """One line per block: id | current type | a short text snippet. Deterministic."""
+    """One line per block: id | current type | a text snippet. Deterministic."""
     lines: list[str] = []
     for block in blocks:
-        snippet = " ".join(block.current_text().split())[:_SNIPPET]
+        snippet = " ".join(block.current_text().split())[:_PROMPT_SNIPPET]
         lines.append(f"{block.id} | {block.type.value} | {snippet}")
     return "\n".join(lines)
 
 
 def build_structurer_prompt(outline: str) -> str:
     return (
-        "Below is every block of a thesis, one per line as `id | current-type | text snippet`. "
-        "For each id, decide its KIND (prose, heading, equation, code, figure, table, reference, "
-        "frontmatter). Most blocks are already right; correct the ones that are mislabelled - in "
-        "particular, spaced-out or fenced program listings should be 'code', and bibliography "
-        "entries 'reference'. Do not quote or rewrite any text.\n\n"
-        'Return ONLY this JSON: {"labels":[{"id":"m1","kind":"prose"}, ...]} - include only the '
-        "ids whose kind you are stating (you may include all of them).\n\n"
+        "Below are blocks from a thesis that a cheap first pass may have MIS-TYPED - each line is "
+        "`id | current-type | text snippet`. They are currently mostly 'paragraph' but some are "
+        "really code, a figure/table caption, a bibliography reference, or front matter. For each "
+        "id, give its true KIND: prose, heading, equation, code, figure, table, reference, "
+        "frontmatter. A spaced-out or fenced program listing is 'code'. Do not quote or rewrite "
+        "any text.\n\n"
+        'Return ONLY this JSON: {"labels":[{"id":"m1","kind":"code"}, ...]} - one entry per id.\n\n'
         "=== BLOCKS ===\n"
         f"{outline}\n"
     )
@@ -119,7 +153,7 @@ def apply_structure(blocks: list[Block], plan: StructurePlan) -> list[Reclassifi
                 id=block.id,
                 from_type=block.type.value,
                 to_type=new_type.value,
-                snippet=" ".join(block.current_text().split())[:_SNIPPET],
+                snippet=" ".join(block.current_text().split())[:_LOG_SNIPPET],
             )
         )
         block.type = new_type
