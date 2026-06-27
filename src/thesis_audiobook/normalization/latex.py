@@ -119,6 +119,8 @@ _UNICODE_MATH = {
     "−": " minus ",  # − (U+2212, not ASCII hyphen)
     "→": " approaches ",  # →
     "∞": " infinity ",  # ∞
+    "′": " prime ",  # ′ (U+2032)
+    "″": " double prime ",  # ″ (U+2033)
     "◦": " degrees ",  # ◦ (OCR degree)
     "°": " degrees ",  # °
     "º": " degrees ",  # º
@@ -146,10 +148,17 @@ _SUP = re.compile(r"(?P<pre>[0-9.]?)<sup>(?P<body>.*?)</sup>", re.IGNORECASE | r
 # before the generic superscript handler so they read as the formula (then the lexicon spells
 # "CO2" as "C O two"). Unit exponents like "m<sup>2</sup>" -> "m squared" are untouched.
 _CHEM_SUP = [
+    # H2O shredded across superscripts in a sub/superscript ("G<sup>H</sup>2<sup>O</sup>" for the
+    # conductance to water vapor); must run first, and keep spaces so it does not glue to "G".
+    (re.compile(r"<sup>H</sup>\s*2\s*<sup>O</sup>", re.IGNORECASE), " H2O "),
     (re.compile(r"\bH<sup>2</sup>O<sup>2</sup>", re.IGNORECASE), "H2O2"),
     (re.compile(r"\bH<sup>2</sup>O\b", re.IGNORECASE), "H2O"),
     (re.compile(r"\bCO<sup>2</sup>", re.IGNORECASE), "CO2"),
+    (re.compile(r"\bHgCl<sup>2</sup>", re.IGNORECASE), "HgCl2"),
     (re.compile(r"\bO<sup>2</sup>", re.IGNORECASE), "O2"),
+    # C3/C4 are photosynthesis plant types, not exponents ("C<sup>3</sup>" is not "C cubed").
+    (re.compile(r"\bC<sup>3</sup>"), "C3"),
+    (re.compile(r"\bC<sup>4</sup>"), "C4"),
 ]
 # An "x" or "×" between two numbers is a multiplication sign. Marker leaves the italic *x* glued
 # as "1.804x10", which the number normalizer otherwise garbles ("one.eight hundred four x one
@@ -176,10 +185,16 @@ def split_display_math(text: str) -> str | None:
 
 def _script_repl(match: re.Match[str]) -> str:
     body = match.group(1)
-    if body == "2":
-        return " squared"
-    if body == "3":
-        return " cubed"
+    if match.group(0)[0] == "^":  # superscript / exponent: 2/3 -> squared/cubed
+        if body == "2":
+            return " squared"
+        if body == "3":
+            return " cubed"
+        return f" {body}" if body else " "
+    # subscript (_): never an exponent. A digit attaches ("CO_2" -> "CO2", spoken "C O two");
+    # a letter gets a space ("v_w" -> "v w").
+    if body.isdigit():
+        return body
     return f" {body}" if body else " "
 
 
@@ -243,8 +258,10 @@ def _script_repl_html(match: re.Match[str]) -> str:
         if all(ch in "+-−.0123456789" for ch in body):
             signed = body.replace("−", " minus ").replace("+", " plus ")
             return f"{pre} to the power of {signed}"
-        if body.lower() in ("o", "◦", "°"):  # "40<sup>o</sup>C" -> a degree sign, not letter o
+        if body in ("◦", "°"):  # an explicit degree glyph
             return f"{pre} degrees "
+        if body.lower() == "o" and match.string[match.end() : match.end() + 1] in ("C", "F"):
+            return f"{pre} degrees "  # "40<sup>o</sup>C" -> degree, but not the O of a formula
         return f"{pre} {body}"
     # pre is empty: classify by the (unconsumed) character before the tag.
     before = match.string[match.start() - 1] if match.start() > 0 else ""

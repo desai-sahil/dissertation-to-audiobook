@@ -133,9 +133,24 @@ def test_clean_markup_chemical_formula_superscripts() -> None:
     assert clean_markup("the CO<sup>2</sup> rate") == "the CO2 rate"
     assert clean_markup("flux of O<sup>2</sup>") == "flux of O2"
     assert clean_markup("a drop of H<sup>2</sup>O here") == "a drop of H2O here"
+    assert clean_markup("rinsed in HgCl<sup>2</sup> then") == "rinsed in HgCl2 then"
+    # C3/C4 are plant types, not exponents
+    assert clean_markup("the C<sup>3</sup> and C<sup>4</sup> plants") == "the C3 and C4 plants"
+    # H2O shredded across superscripts (the G^{H2O} conductance) is reassembled, not "degrees"
+    out = clean_markup("conductance (G<sup>H</sup>2<sup>O</sup>) rose")
+    assert "H2O" in out and "degrees" not in out
     # a genuine unit exponent is still spoken as squared/cubed
     assert clean_markup("area m<sup>2</sup> wide") == "area m squared wide"
     assert "cubed" in clean_markup("volume cm<sup>3</sup>")
+
+
+def test_clean_markup_latex_subscript_is_not_squared() -> None:
+    # A LaTeX subscript "_2" is a subscript, not an exponent: "$CO_2$" must not read "CO squared".
+    assert "squared" not in clean_markup("the $CO_2$ level")
+    assert "CO2" in clean_markup("the $CO_2$ level")
+    assert clean_markup("the $v_w$ term") == "the v w term"  # subscript letter keeps its space
+    # a real exponent in math is still squared
+    assert "squared" in clean_markup("area $m^2$ here")
 
 
 def test_clean_markup_never_leaks_latex_or_tags() -> None:
