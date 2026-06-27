@@ -85,16 +85,31 @@ def spoken_citation(entry: BibEntry, policy: str, *, suppress_name: bool = False
     return f"{_authors_phrase(entry)} {year}".strip()
 
 
+def _lookup_citation(
+    citations: dict[str, Citation], number: str, chapter: int | None
+) -> Citation | None:
+    """Resolve a marker number to its Citation. Tries the chapter-scoped key "C:n" first (a
+    stapled-papers thesis restarts numbering per chapter), then the bare "n" (a globally
+    numbered thesis, e.g. the poppler/GROBID path), so both schemes work."""
+    if chapter is not None:
+        scoped = citations.get(f"{chapter}:{number}")
+        if scoped is not None:
+            return scoped
+    return citations.get(number)
+
+
 def resolve_citations(
     text: str,
     citations: dict[str, Citation],
     bibliography: dict[str, BibEntry],
     policy: str,
     overrides: dict[str, str] | None = None,
+    chapter: int | None = None,
 ) -> str:
     """Replace each marker with its spoken form. `overrides` maps a marker number to a
     pre-validated natural phrase (from the LLM naturalizer); markers without an override
-    fall back to the deterministic author-year rendering."""
+    fall back to the deterministic author-year rendering. `chapter` enables per-chapter
+    citation numbering (stapled-papers theses); None keeps global numbering."""
     overrides = overrides or {}
     if policy == "drop":
         return expand_et_al(_MARKER.sub("", text))
@@ -107,7 +122,7 @@ def resolve_citations(
             if number in overrides:
                 spokens.append(overrides[number])
                 continue
-            citation = citations.get(number)
+            citation = _lookup_citation(citations, number, chapter)
             if citation is None or citation.bib_key is None:
                 continue
             entry = bibliography.get(citation.bib_key)
@@ -156,6 +171,7 @@ class CitationsStage:
                     doc.bibliography,
                     policy,
                     overrides=overrides.get(block.id, {}),
+                    chapter=block.chapter,
                 )
         return doc
 
@@ -178,7 +194,7 @@ class CitationsStage:
             for number in _marker_numbers(text):
                 if number in block_entries:
                     continue
-                citation = doc.citations.get(number)
+                citation = _lookup_citation(doc.citations, number, block.chapter)
                 entry = (
                     doc.bibliography.get(citation.bib_key)
                     if citation and citation.bib_key

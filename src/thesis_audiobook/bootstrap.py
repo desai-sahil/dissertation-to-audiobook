@@ -15,6 +15,7 @@ from thesis_audiobook.adapters.elevenlabs_tts import ElevenLabsClient, ElevenLab
 from thesis_audiobook.adapters.ffmpeg_muxer import FfmpegMuxer
 from thesis_audiobook.adapters.file_cache import FileCache
 from thesis_audiobook.adapters.grobid_client import GrobidClient
+from thesis_audiobook.adapters.markdown_bib_parser import MarkdownBibParser
 from thesis_audiobook.adapters.markdown_parser import MarkdownFileParser
 from thesis_audiobook.adapters.marker_parser import MarkerParser
 from thesis_audiobook.adapters.mineru_parser import MinerUParser
@@ -84,7 +85,7 @@ def select_parser_adapters(config: Config) -> tuple[PdfParser, BibParser]:
     if config.parser_backend == "markdown":
         if not config.markdown_path:
             raise ValueError("parser_backend 'markdown' requires config.markdown_path")
-        return MarkdownFileParser(config.markdown_path), MockBibParser()
+        return MarkdownFileParser(config.markdown_path), MarkdownBibParser(config.markdown_path)
     if config.parser_backend == "poppler":
         return PopplerParser(), PopplerBibParser()
     if config.parser_backend == "mineru":
