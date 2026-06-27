@@ -32,6 +32,7 @@ from thesis_audiobook.context import Context
 from thesis_audiobook.ir import Block, BlockType, Document
 from thesis_audiobook.normalization.latex import clean_markup
 from thesis_audiobook.normalization.mojibake import fix_mojibake
+from thesis_audiobook.normalization.repetition import collapse_repetition
 from thesis_audiobook.warnings import LowConfidence
 
 _BACKMATTER_HEADINGS = {"references", "bibliography"}
@@ -150,9 +151,20 @@ class BuildIrStage:
             # fix_mojibake repairs OCR detached-diacritic artifacts ("Scholander ¨"); then
             # clean_markup turns any Marker LaTeX/HTML markup into plain tokens. Both are
             # no-ops on clean (poppler) prose, so this stays parser-agnostic.
-            block.text = rejoin_split_tokens(
+            cleaned = rejoin_split_tokens(
                 dehyphenate(normalize_ligatures(clean_markup(fix_mojibake(block.text))))
             )
+            # Collapse Marker's pathological caption loops (Gate A warning, never silent).
+            cleaned, removed = collapse_repetition(cleaned)
+            if removed:
+                ctx.warnings.add(
+                    LowConfidence(
+                        block_id=block.id,
+                        reason=f"collapsed {removed} words of repeated OCR garble",
+                        score=0.4,
+                    )
+                )
+            block.text = cleaned
 
         running = detect_running_artifacts(doc.blocks)
         kept = [block for block in doc.blocks if not _is_artifact(block, running)]

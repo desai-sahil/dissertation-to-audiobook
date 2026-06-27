@@ -93,6 +93,40 @@ _ENTITY = {
     "¿": " greater than ",
 }
 _ENTITY_RE = re.compile("|".join(re.escape(key) for key in _ENTITY))
+# Literal unicode math glyphs that Marker OCRs straight into the prose (outside $...$), so the
+# LaTeX passes never see them. Mapped to spoken words; a no-op on clean English, which has none.
+_UNICODE_MATH = {
+    "⟨": " ",  # ⟨ angle bracket: dropped (context carries "average of")
+    "⟩": " ",  # ⟩
+    "∆": " delta ",  # ∆ increment
+    "∇": " del ",  # ∇ nabla
+    "∂": " partial ",  # ∂
+    "∼": " approximately ",  # ∼
+    "≈": " approximately ",  # ≈
+    "≃": " approximately ",  # ≃
+    "≅": " approximately ",  # ≅
+    "≡": " defined as ",  # ≡
+    "≪": " much less than ",  # ≪
+    "≫": " much greater than ",  # ≫
+    "≤": " less than or equal to ",  # ≤
+    "≥": " greater than or equal to ",  # ≥
+    "≠": " not equal to ",  # ≠
+    "∝": " proportional to ",  # ∝
+    "±": " plus or minus ",  # ±
+    "×": " times ",  # ×
+    "−": " minus ",  # − (U+2212, not ASCII hyphen)
+    "→": " approaches ",  # →
+    "∞": " infinity ",  # ∞
+    "◦": " degrees ",  # ◦ (OCR degree)
+    "°": " degrees ",  # °
+    "º": " degrees ",  # º
+    "√": " square root ",  # √
+    "∑": " sum ",  # ∑
+    "∫": " integral ",  # ∫
+}
+_UNICODE_TABLE = str.maketrans(_UNICODE_MATH)
+# Any of these characters means the text needs cleaning; without one, clean_markup is a no-op.
+_MARKUP_TRIGGER = "$<\\*&¡¿" + "".join(_UNICODE_MATH)
 # Markdown emphasis: **bold** / *italic*. Stripped so the markers are not voiced as "asterisk".
 _EMPH = re.compile(r"\*\*(?P<b>.+?)\*\*|\*(?P<i>[^*\n]+?)\*", re.DOTALL)
 # A LaTeX environment wrapper (e.g. \begin{bmatrix} ... \end{bmatrix}); drop the markers.
@@ -155,7 +189,7 @@ def _delatex(expr: str) -> str:
 def clean_markup(text: str) -> str:
     """Convert inline LaTeX, HTML markup, and markdown emphasis to plain text. No-op on clean
     (poppler) prose."""
-    if not any(ch in text for ch in "$<\\*&¡¿"):
+    if not any(ch in text for ch in _MARKUP_TRIGGER):
         return text
     text = _BR.sub(" ", text)
     text = _SUP.sub(_script_repl_html, text)
@@ -172,24 +206,38 @@ def clean_markup(text: str) -> str:
     # stray marker) becomes a space, so it is never voiced as the word "asterisk".
     text = _EMPH.sub(lambda m: m.group("b") or m.group("i") or "", text)
     text = text.replace("*", " ")
+    # Literal unicode math glyphs (and OCR degree marks) left in the prose -> spoken words.
+    text = text.translate(_UNICODE_TABLE)
     return " ".join(text.split())
 
 
 def _script_repl_html(match: re.Match[str]) -> str:
     pre = match.group("pre")
     body = match.group("body").strip()
-    # Superscript attached to a number: an exponent or a fragmented decimal - keep the value.
+    # Superscript fused to a number: a Marker-split decimal ("8.<sup>314</sup>" -> "8.314") or an
+    # exponent ("10<sup>5</sup>" -> "10 to the power of 5").
     if pre and (pre == "." or pre.isdigit()):
-        if not body.isdigit():
-            return f"{pre} {body}" if body else pre
-        if pre == ".":
-            return f"{pre}{body}"  # "8." + "314" -> "8.314" (Marker split the decimal)
-        return f"{pre} to the power of {body}"  # "10<sup>5</sup>" -> "10 to the power of 5"
-    # Otherwise it follows a letter/space: exponent words, or a citation marker to drop.
-    if body == "2":
-        return " squared"
-    if body == "3":
-        return " cubed"
-    if not body or body.isdigit():
-        return ""  # bare-number footnote/citation superscript
+        if not body:
+            return pre
+        if pre == "." and body.isdigit():
+            return f"{pre}{body}"
+        if all(ch in "+-−.0123456789" for ch in body):
+            signed = body.replace("−", " minus ").replace("+", " plus ")
+            return f"{pre} to the power of {signed}"
+        return f"{pre} {body}"
+    # pre is empty: classify by the (unconsumed) character before the tag.
+    before = match.string[match.start() - 1] if match.start() > 0 else ""
+    if not body:
+        return ""
+    if before.isalpha():
+        # Attached to a word: a unit exponent (m<sup>2</sup> -> "m squared") or, for a bare
+        # number, a footnote/citation marker to drop ("shown<sup>12</sup>" -> "shown").
+        if body == "2":
+            return " squared"
+        if body == "3":
+            return " cubed"
+        return "" if body.isdigit() else f" {body}"
+    # Standalone (space/operator/start before): Marker shredded an equation into per-character
+    # <sup> tags, so this digit/symbol is a real value - keep it. Dropping it as a citation
+    # marker silently garbled measurements ("8.314" -> ".314", "= 0 Pa" -> "= Pa").
     return f" {body}"

@@ -92,6 +92,28 @@ def test_clean_markup_matrix_and_nested_frac() -> None:
     assert "frac" not in nested and "over" in nested
 
 
+def test_clean_markup_shredded_superscript_equation() -> None:
+    # Marker typesets some equations with every character in its own <sup>; a digit superscript
+    # preceded by a space/operator is a real value, not a citation marker, and must be KEPT.
+    # (QC found "8.314" -> ".314", "= 0 Pa" -> "= Pa", "2.88 ml" -> "squared.eighty-eight".)
+    gas = clean_markup("where <sup>R</sup> <sup>=</sup> <sup>8</sup>.<sup>314</sup> J")
+    assert "8.314" in gas and "R = 8.314 J" in gas
+    assert "0 Pa" in clean_markup("ψ <sup>=</sup> <sup>0</sup> Pa")  # the zero is not dropped
+    assert "< 0" in clean_markup("water cannot have ψ < <sup>0</sup>, as")
+    assert "2.88 ml" in clean_markup("and <sup>2</sup>.<sup>88</sup> ml Brij")  # not "squared"
+    assert "0.45" in clean_markup("porosity, ϕ <sup>=</sup> <sup>0</sup>.<sup>45</sup> and")
+
+
+def test_clean_markup_unicode_math_glyphs() -> None:
+    # Literal unicode glyphs Marker OCRs into prose (not inside $...$) must become spoken words.
+    assert "much less than" in clean_markup("ψ term <sup>≪</sup> ψ TLP")
+    assert clean_markup("x ≡ y") == "x defined as y"
+    assert clean_markup("at ∼ 3 nm") == "at approximately 3 nm"
+    assert clean_markup("700 ◦C") == "700 degrees C"
+    assert "delta" in clean_markup("the gradient ∆I is") and "∆" not in clean_markup("∆I")
+    assert "−" not in clean_markup("a − b") and "minus" in clean_markup("a − b")
+
+
 def test_clean_markup_never_leaks_latex_or_tags() -> None:
     messy = r"$E=4.2\times10^{-5}~{\rm kg/(m^2.s)}$ and $\mu m$ scale<sup>3</sup>"
     out = clean_markup(messy)
