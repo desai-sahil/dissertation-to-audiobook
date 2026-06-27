@@ -39,10 +39,20 @@ def test_clean_markup_inline_math(raw: str, expected_contains: str) -> None:
 def test_clean_markup_html() -> None:
     assert clean_markup("area m<sup>2</sup> wide") == "area m squared wide"
     assert clean_markup("line one<br>line two") == "line one line two"
-    # bare-number superscripts (citation markers) are dropped, not voiced
+    # bare-number superscripts AFTER A WORD (citation markers) are dropped, not voiced
     assert clean_markup("as shown<sup>12</sup> here") == "as shown here"
     assert "<sub>" not in clean_markup("x<sub>i</sub>") and "x i" in clean_markup("x<sub>i</sub>")
     assert clean_markup("<b>bold</b> text") == "bold text"
+
+
+def test_clean_markup_number_superscripts_are_kept() -> None:
+    # A superscript attached to a NUMBER is a value, not a citation - keep it (QC found
+    # "8.314" was becoming "8." and "10^5" was becoming "10").
+    assert clean_markup("R = 8.<sup>314</sup> J") == "R = 8.314 J"
+    assert clean_markup("about -10<sup>5</sup> Pa") == "about -10 to the power of 5 Pa"
+    assert clean_markup("10<sup>2</sup> to 10<sup>6</sup>") == (
+        "10 to the power of 2 to 10 to the power of 6"
+    )
 
 
 def test_clean_markup_embedded_display_and_greek_spacing() -> None:

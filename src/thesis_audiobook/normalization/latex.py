@@ -78,7 +78,10 @@ _DISPLAY_MATH = re.compile(r"^\$\$(?P<body>.+?)\$\$$", re.DOTALL)
 _DISPLAY_INLINE = re.compile(r"\$\$(?P<body>.+?)\$\$", re.DOTALL)
 _INLINE_MATH = re.compile(r"\$(?P<body>[^$]+?)\$")
 _TAG_DROP = re.compile(r"</?(?:b|i|em|strong|ol|ul|li|span)>", re.IGNORECASE)
-_SUP = re.compile(r"<sup>(?P<body>.*?)</sup>", re.IGNORECASE | re.DOTALL)
+# Capture the char before <sup> so a superscript ATTACHED TO A NUMBER (exponent or a
+# Marker-fragmented decimal like "8.<sup>314</sup>") is kept, while one after a word (a
+# citation marker) is dropped. Without this, "8.314" -> "8." and "10^5" -> "10".
+_SUP = re.compile(r"(?P<pre>[0-9.]?)<sup>(?P<body>.*?)</sup>", re.IGNORECASE | re.DOTALL)
 _SUB = re.compile(r"<sub>(?P<body>.*?)</sub>", re.IGNORECASE | re.DOTALL)
 _BR = re.compile(r"<br\s*/?>", re.IGNORECASE)
 _WRAPPER_CMD = re.compile(r"\\(?:rm|text|mathrm|mathbf|mathit|mathcal|operatorname|left|right)\b")
@@ -138,12 +141,20 @@ def clean_markup(text: str) -> str:
 
 
 def _script_repl_html(match: re.Match[str]) -> str:
+    pre = match.group("pre")
     body = match.group("body").strip()
+    # Superscript attached to a number: an exponent or a fragmented decimal - keep the value.
+    if pre and (pre == "." or pre.isdigit()):
+        if not body.isdigit():
+            return f"{pre} {body}" if body else pre
+        if pre == ".":
+            return f"{pre}{body}"  # "8." + "314" -> "8.314" (Marker split the decimal)
+        return f"{pre} to the power of {body}"  # "10<sup>5</sup>" -> "10 to the power of 5"
+    # Otherwise it follows a letter/space: exponent words, or a citation marker to drop.
     if body == "2":
         return " squared"
     if body == "3":
         return " cubed"
-    # Bare numeric/footnote superscripts (citation markers) are dropped; short text kept.
     if not body or body.isdigit():
-        return ""
+        return ""  # bare-number footnote/citation superscript
     return f" {body}"
