@@ -51,8 +51,15 @@ def test_not_page_number() -> None:
     "text,expected",
     [
         ("[12] Smith et al. Title.", BlockType.reference_list),
+        ("- [3] Smith et al. Title. Journal, 2019.", BlockType.reference_list),  # markdown bullet
         ("CHAPTER 6", BlockType.heading),
         ("6.2 Results", BlockType.heading),
+        ("Figure 1.1: Gradients in water potential.", BlockType.figure_caption),
+        ("Table 4.1: Measured conductances.", BlockType.figure_caption),
+        ("Figure A.7: Normalized difference in molar volume.", BlockType.figure_caption),
+        # a body sentence opening with a figure reference (no colon) is NOT a caption
+        ("Figure 2.1(c-j) present sketches of the pore states.", BlockType.paragraph),
+        ("As shown in Figure 1.1, the gradient steepens.", BlockType.paragraph),
         ("A normal paragraph of prose.", BlockType.paragraph),
     ],
 )

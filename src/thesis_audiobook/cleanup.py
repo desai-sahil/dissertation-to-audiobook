@@ -22,6 +22,12 @@ _SECTION = re.compile(r"^\s*(\d+(?:\.\d+)+)\s+(.*\S)\s*$")
 _SECTION_NUMBER_ONLY = re.compile(r"^\s*(\d+(?:\.\d+)+)\s*$")
 # A reference entry: "[1] Author..." or Marker's markdown list form "- [1] Author...".
 _REFERENCE = re.compile(r"^\s*[-*•]?\s*\[(\d+)\]\s")
+# A figure/table caption: "Figure 1.1:", "Fig. 3:", "Table 4.1:", "Figure A.7:". The colon
+# (and number) distinguishes a caption from a body sentence that merely opens with "Figure 2.1
+# present sketches..." (no colon).
+_CAPTION = re.compile(
+    r"^\s*(?:Figure|Fig\.?|Table|Scheme)\s+(?:[A-Z]\.)?\d+(?:\.\d+)*\s*:", re.IGNORECASE
+)
 _PAGE_NUMBER = re.compile(r"^\s*\d{1,4}\s*$")
 
 
@@ -91,6 +97,8 @@ def classify_block(text: str) -> BlockType:
         return BlockType.paragraph
     if is_reference_entry(stripped):
         return BlockType.reference_list
+    if _CAPTION.match(stripped):
+        return BlockType.figure_caption
     if _CHAPTER.match(stripped) or _SECTION.match(stripped):
         return BlockType.heading
     return BlockType.paragraph

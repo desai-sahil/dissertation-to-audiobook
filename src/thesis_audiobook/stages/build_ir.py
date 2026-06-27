@@ -54,18 +54,34 @@ def _keeps_hyphen(text: str) -> bool:
     return bool(match) and len(match.group(1)) >= 3
 
 
+# Block types that can sit between a sentence and its continuation (a figure or table that
+# interrupts the prose) without being part of it; the rejoin looks past them.
+_INTERPOSABLE = {BlockType.figure_caption, BlockType.table}
+
+
+def _last_paragraph_index(merged: list[Block]) -> int | None:
+    """Index of the nearest preceding paragraph, looking past interposed figures/tables."""
+    for k in range(len(merged) - 1, -1, -1):
+        if merged[k].type is BlockType.paragraph:
+            return k
+        if merged[k].type not in _INTERPOSABLE:
+            return None  # a heading/backmatter/etc. breaks the continuation
+    return None
+
+
 def _merge_cross_page_continuations(blocks: list[Block], ctx: Context) -> list[Block]:
     merged: list[Block] = []
     for block in blocks:
-        previous = merged[-1] if merged else None
-        if not (
-            previous is not None
-            and previous.type is BlockType.paragraph
-            and block.type is BlockType.paragraph
-        ):
+        if block.type is not BlockType.paragraph:
             merged.append(block)
             continue
-        if ends_hyphenated(previous.text):
+        prev_idx = _last_paragraph_index(merged)
+        if prev_idx is None:
+            merged.append(block)
+            continue
+        previous = merged[prev_idx]
+        interposed = prev_idx != len(merged) - 1  # a figure/table sits between the two
+        if ends_hyphenated(previous.text) and not interposed:
             joined = previous.text.rstrip()
             previous.text = (joined if _keeps_hyphen(joined) else joined[:-1]) + block.text
             ctx.warnings.add(
@@ -77,8 +93,20 @@ def _merge_cross_page_continuations(blocks: list[Block], ctx: Context) -> list[B
             )
             continue
         if not _ends_sentence(previous.text):
-            # Benign reading-order repair (whitespace only, no content altered).
+            # Across an interposed figure/table, only rejoin an obvious continuation (a
+            # lower-case start), so a real new paragraph is not glued onto the previous one.
+            if interposed and not block.text[:1].islower():
+                merged.append(block)
+                continue
             previous.text = f"{previous.text.rstrip()} {block.text.lstrip()}"
+            if interposed:
+                ctx.warnings.add(
+                    LowConfidence(
+                        block_id=previous.id,
+                        reason="rejoined a sentence split across an interposed figure or table",
+                        score=0.5,
+                    )
+                )
             continue
         merged.append(block)
     return merged

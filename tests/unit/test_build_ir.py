@@ -120,7 +120,9 @@ def test_markdown_bulleted_reference_not_absorbed_by_data_availability(tiny_ir_p
     # Availability note ends in a URL (no period), so without typing the list first the merge
     # would swallow the whole bibliography into that paragraph and speak it. It must not.
     blocks = [
-        Block(id="da", type=BlockType.paragraph, text="All codes can be found at https://x.io/repo"),
+        Block(
+            id="da", type=BlockType.paragraph, text="All codes can be found at https://x.io/repo"
+        ),
         Block(id="r1", type=BlockType.paragraph, text="- [1] A. Author. A title. Journal, 2019."),
         Block(id="r2", type=BlockType.paragraph, text="- [2] B. Writer. Another. Journal, 2020."),
     ]
@@ -142,6 +144,33 @@ def test_per_chapter_bibliography_does_not_run_away(tiny_ir_path: Path) -> None:
     kinds = {b.id: b.type for b in out.blocks}
     assert kinds["r1"] is BlockType.backmatter
     assert kinds["ch2"] is BlockType.heading and kinds["body2"] is BlockType.paragraph
+
+
+def test_rejoins_sentence_split_across_interposed_figure(tiny_ir_path: Path) -> None:
+    # A figure (image + caption) interrupts a sentence; the lower-case continuation must rejoin
+    # the body paragraph across it, while the caption stays its own (skippable) block.
+    blocks = [
+        Block(id="body", type=BlockType.paragraph, text="this limits our capacity to understand"),
+        Block(id="img", type=BlockType.figure_caption, text=""),
+        Block(id="cap", type=BlockType.paragraph, text="Figure 1.1: Gradients in water potential."),
+        Block(id="cont", type=BlockType.paragraph, text="and manipulate these processes."),
+    ]
+    out = _run(blocks, _ctx(tiny_ir_path))
+    body = next(b for b in out.blocks if b.id == "body")
+    assert body.text == "this limits our capacity to understand and manipulate these processes."
+    assert "cont" not in {b.id for b in out.blocks}  # continuation merged up
+    assert next(b for b in out.blocks if b.id == "cap").type is BlockType.figure_caption
+
+
+def test_new_paragraph_after_figure_is_not_glued(tiny_ir_path: Path) -> None:
+    # Guard: an upper-case new paragraph after a figure is a fresh sentence, not a continuation.
+    blocks = [
+        Block(id="body", type=BlockType.paragraph, text="The prior point ended cleanly"),
+        Block(id="cap", type=BlockType.paragraph, text="Figure 2.1: A diagram."),
+        Block(id="next", type=BlockType.paragraph, text="The next paragraph stands alone."),
+    ]
+    out = _run(blocks, _ctx(tiny_ir_path))
+    assert {b.id for b in out.blocks} == {"body", "cap", "next"}  # nothing merged
 
 
 def test_attaches_section_to_body_paragraphs(tiny_ir_path: Path) -> None:
