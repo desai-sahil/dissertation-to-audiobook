@@ -49,29 +49,60 @@ _LOG_SNIPPET = 140  # shorter, for the change log
 
 # General (not per-thesis) signals that a block typed `paragraph` may actually be code or other
 # non-prose the cheap pass missed. Triage flags these for the model; everything else - the
-# confident majority - never reaches it.
+# confident majority - never reaches it. Strong signals flag on their own; weak signals are
+# scored and flag only when two or more co-occur, so a stray "->" or "x = f(y)" in real prose
+# (a chemistry arrow, an inline definition) is left alone while genuine code - which always
+# carries several operators/calls/brackets at once - is caught. False positives only cost one
+# classification; false negatives would let code be read aloud, so the bias is toward flagging.
 _SPACED_CHARS = re.compile(r"\b\w(?: \w){3,}")  # "i m p o" - parser-shredded characters
-_LIB_CALL = re.compile(
-    r"\b(?:np|pd|plt|os|sys|re|math|sklearn|tf|torch|cv2|json|requests|scipy)\.\w"
+# Strong, near-unambiguous code statements (rare in prose); flag on their own. Anchored/qualified
+# so "the import of these results" or "we def ine" do not trip them.
+_CODE_KEYWORDS = re.compile(
+    r"(?m)^\s*(?:import|from)\s+\w|\bimport \w+ as |\bfrom \w+ import\b|\bdef \w+\(|\bprint\(|"
+    r"\bfunction \w+\("
 )
-_CODE_TOKENS = re.compile(
-    r"```|def \w+\(|\bimport \w|from \w+ import|print\(|\w+\s*=\s*\w+\(|=>|->|;\s*$|\{\s*\}"
-)
+_CONFIG_LINE = re.compile(r"(?m)^\s*[\w.\-]+\s*[:=]\s*\S")  # "key: value" / "key = value" line
+_WEAK_SIGNALS = [
+    re.compile(r"[A-Za-z_]\w*\("),  # a function call: name(
+    re.compile(r"\b\w+\.\w+\("),  # a method call: obj.method(
+    re.compile(r"\w\s*=\s*\w"),  # an assignment: x = y
+    re.compile(r"<-|=>|->|<=|>=|&&|\|\||::|!=|\+=|-=|\*="),  # operators
+    re.compile(r"[{}]|;.*;"),  # braces, or two+ semicolons (CSS/code, not one prose clause)
+    re.compile(r"\$\w+|\$\{"),  # shell variable
+    re.compile(r"(?:^|\s)--?[A-Za-z]\w*\b"),  # CLI flag: -c, --verbose
+    re.compile(r" \| |\s>>?\s|\s<\s|2>"),  # shell pipe / redirect (also a markdown table row)
+    re.compile(r"https?://|www\.|/\w+/\w+"),  # URL or a multi-level file path
+    re.compile(r'"\w+"\s*:'),  # JSON key
+    re.compile(r"\bSELECT\b.+\bFROM\b", re.IGNORECASE),  # SQL
+]
+
+
+def _is_blob(text: str) -> bool:
+    """A single opaque token (base64, a bare file path, a URL-only line) or a comma-stream with
+    almost no spaces (a CSV/data row) - never narratable prose."""
+    stripped = text.strip()
+    if " " not in stripped:
+        return len(stripped) >= 24 and any(c.isalpha() for c in stripped)
+    return stripped.count(",") >= 4 and stripped.count(" ") <= stripped.count(",") // 2
 
 
 def _looks_non_prose(text: str) -> bool:
     """A general, conservative test that a paragraph might be code/notation rather than prose.
-    Generous on purpose: a false positive only costs one classification; a false negative would
-    let code be read aloud."""
-    if "```" in text or _SPACED_CHARS.search(text) or _LIB_CALL.search(text):
+    Biased toward flagging: a false positive only costs one classification; a false negative
+    would let code be read aloud."""
+    if "```" in text or _SPACED_CHARS.search(text) or _is_blob(text) or _CODE_KEYWORDS.search(text):
+        return True  # strong, unambiguous signals
+    score = sum(1 for sig in _WEAK_SIGNALS if sig.search(text))
+    if len(_CONFIG_LINE.findall(text)) >= 2:  # a block of key:value / key=value lines
         return True
-    if _CODE_TOKENS.search(text):
+    if score >= 2:  # several code signals at once -> code, not a stray symbol in prose
         return True
     words = text.split()
-    if len(words) < 4:
-        return False  # too short to judge by ratio; leave it to the deterministic types
-    prose_words = sum(1 for w in words if len(w) >= 2 and any(ch.isalpha() for ch in w))
-    return prose_words / len(words) < 0.5  # symbol/short-token heavy -> likely code or notation
+    if len(words) >= 4:
+        prose_words = sum(1 for w in words if len(w) >= 2 and any(ch.isalpha() for ch in w))
+        if prose_words / len(words) < 0.4:  # symbol/number heavy -> a dump, not prose
+            return True
+    return False
 
 
 def suspicious_blocks(blocks: list[Block]) -> list[Block]:

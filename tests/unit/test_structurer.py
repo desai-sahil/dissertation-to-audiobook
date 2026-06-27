@@ -29,18 +29,30 @@ class _FakeLlm:
 @pytest.mark.parametrize(
     "text,suspicious",
     [
-        # code-like -> triaged to the model
+        # --- must be flagged (code / non-narratable), several from the red-team ---
         ("i m p o rt p a n d a s a s pd", True),  # parser-shredded code
         ("import numpy as np", True),
         ("plt.figure(figsize=(6, 4))", True),
         ("def calibrate(data):", True),
-        ("result = compute(x)", True),
         ("```python", True),
         ("S e r i e s C r e at e d by S h o r t Cut", True),  # spaced garble
-        # genuine prose -> never sent
+        ("df = pd.read_csv(path)", True),  # assign + method-call
+        ("int main(int argc, char **argv) {", True),  # C: call + brace
+        ("SELECT a.id FROM samples a JOIN reads b ON a.id = b.sample_id", True),  # SQL
+        ('{"gene": "RBCS1", "fold_change": 2.4, "padj": 0.01}', True),  # JSON
+        ("cat reads.fq | grep -c x > counts.txt", True),  # shell pipe + flag + redirect
+        ("learning_rate: 0.001\nbatch_size: 32\noptimizer: adam", True),  # config block
+        ("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNk", True),  # base64 blob
+        ("Logger,Ch1,Ch2,Ch3,2023-01-01T00:00,21.4,55.2,1013", True),  # CSV row
+        ("Coeff: 0.998 1.002 0.997 -0.011 1.004 0.996", True),  # number dump
+        # --- must NOT be flagged (genuine prose, even when it mentions code/chemistry) ---
         ("The stomata regulate transpiration under drought stress.", False),
         ("We measured 5 ml of 0.1 M NaCl at 25 C for 30 minutes.", False),
         ("As shown in Figure 1.1, the gradient steepens toward the tip.", False),
+        ("Background subtraction relied on np.median over the dark frames.", False),
+        ("Peaks were detected with scipy.signal and their areas integrated.", False),
+        ("All analyses used the lme4 and emmeans packages in R version 4.2.1.", False),
+        ("Catalase drives the disproportionation 2 H2O2 -> 2 H2O + O2 here.", False),
     ],
 )
 def test_triage_flags_code_not_prose(text: str, suspicious: bool) -> None:
