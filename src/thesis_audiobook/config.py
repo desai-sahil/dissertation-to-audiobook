@@ -35,7 +35,7 @@ class VoiceSettings(StrictModel):
 
 class Profile(StrictModel):
     name: str = "committee"
-    equation_tier: Literal["announce", "gloss", "full"] = "gloss"
+    equation_tier: Literal["announce", "full"] = "announce"
     citation_policy: Literal["drop", "brief", "full"] = "brief"
     table_handling: Literal["skip", "summarize"] = "summarize"
     include_appendices: bool = False
@@ -53,7 +53,7 @@ class Profile(StrictModel):
 def committee_profile() -> Profile:
     return Profile(
         name="committee",
-        equation_tier="gloss",
+        equation_tier="announce",
         citation_policy="brief",
         table_handling="summarize",
         include_appendices=False,

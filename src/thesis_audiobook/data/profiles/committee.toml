@@ -1,7 +1,7 @@
 # Committee profile: faithful, detailed rendering for a PhD committee.
 # Edit this data file to retune the profile; no code change needed.
 name = "committee"
-equation_tier = "gloss"          # gloss equations via the LLM
+equation_tier = "announce"       # announce equations by number, no formula read aloud
 citation_policy = "brief"        # "Smith and colleagues twenty nineteen"
 table_handling = "summarize"     # summarize tables via the LLM
 include_appendices = false

@@ -40,11 +40,9 @@ class SelectStage:
                     Handling.summarize if profile.table_handling == "summarize" else Handling.skip
                 )
             elif block.type is BlockType.equation_display:
-                # Kept; the math stage glosses (committee) or announces (general).
+                # Kept; the math stage announces it by number (no formula read aloud).
                 block.keep = True
-                block.handling = (
-                    Handling.gloss if profile.equation_tier == "gloss" else Handling.announce
-                )
+                block.handling = Handling.announce
             elif block.type is BlockType.backmatter:
                 block.keep = profile.include_appendices
                 block.handling = Handling.speak if profile.include_appendices else Handling.skip

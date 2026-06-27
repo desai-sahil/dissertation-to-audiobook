@@ -29,7 +29,6 @@ class BlockType(StrEnum):
 class Handling(StrEnum):
     speak = "speak"
     skip = "skip"
-    gloss = "gloss"
     summarize = "summarize"
     announce = "announce"
 

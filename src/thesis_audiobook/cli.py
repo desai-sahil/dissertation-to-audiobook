@@ -248,10 +248,10 @@ def run(
 ) -> None:
     """Run the pipeline: parse -> script -> render -> assemble.
 
-    Parsing is real (poppler offline, or marker/mineru + GROBID). LLM glosses and TTS are
-    mocked by default; --llm anthropic and --tts elevenlabs switch on the real, billed
-    services (the real render also needs ffmpeg). --dry-run estimates cost with no external
-    calls; --preview renders only the first chapter.
+    Parsing is real (poppler offline, or marker/mineru + GROBID). The LLM (structure map +
+    curation) and TTS are mocked by default; --llm anthropic and --tts elevenlabs switch on
+    the real, billed services (the real render also needs ffmpeg). --dry-run estimates cost
+    with no external calls; --preview renders only the first chapter.
     """
     if not input_pdf.exists():
         typer.echo(f"error: input PDF not found: {input_pdf}", err=True)
@@ -288,7 +288,7 @@ def run(
         pdf_bytes=input_pdf.read_bytes(),
         log_enabled=False,
         # --dry-run makes zero external calls, so force the mocks even with --llm/--tts set
-        # (the curator and gloss stages run before assemble_script).
+        # (the cartographer and curator stages run before assemble_script).
         use_real_llm=use_real_llm and not dry_run,
         use_real_tts=use_real_tts and not dry_run,
     )
@@ -318,7 +318,7 @@ def run(
     if use_real_llm and not os.environ.get("ANTHROPIC_API_KEY"):
         typer.echo(
             "error: --llm anthropic needs ANTHROPIC_API_KEY set in this shell "
-            "(used by the equation glosses and the pronunciation curator).",
+            "(used by the structure map and the pronunciation curator).",
             err=True,
         )
         raise typer.Exit(code=2)
@@ -340,7 +340,7 @@ def run(
 
     _unavailable = (AnthropicUnavailableError, ElevenLabsUnavailableError, FfmpegUnavailableError)
 
-    # Phase 3: prepare the narration script (build IR -> structure -> select -> gloss ->
+    # Phase 3: prepare the narration script (build IR -> structure -> select -> math ->
     # citations -> normalize -> assemble_script). Artifacts are written before any TTS spend.
     typer.echo("Phase 3: preparing the narration script ...")
     try:
@@ -433,7 +433,7 @@ def run(
     if use_real_tts:
         typer.echo("  Real ElevenLabs render + ffmpeg mux were used (billed).")
     elif use_real_llm:
-        typer.echo("  Real Anthropic glosses were used (billed); TTS mocked.")
+        typer.echo("  Real Anthropic calls (structure + curation) were used (billed); TTS mocked.")
     else:
         typer.echo("  no paid calls were made (LLM/TTS mocked).")
 

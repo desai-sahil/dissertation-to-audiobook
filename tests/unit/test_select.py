@@ -51,8 +51,9 @@ def test_table_handling_differs_by_profile(tiny_ir_path: Path) -> None:
     assert _selected("general", tiny_ir_path)["table"].handling is Handling.skip
 
 
-def test_equation_handling_differs_by_profile(tiny_ir_path: Path) -> None:
-    assert _selected("committee", tiny_ir_path)["equation_display"].handling is Handling.gloss
+def test_equation_handling_is_announce_for_both_profiles(tiny_ir_path: Path) -> None:
+    # Display equations are announced by number on every profile (no LLM gloss tier).
+    assert _selected("committee", tiny_ir_path)["equation_display"].handling is Handling.announce
     assert _selected("general", tiny_ir_path)["equation_display"].handling is Handling.announce
 
 

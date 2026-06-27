@@ -42,14 +42,15 @@ class ScriptQcReport(StrictModel):
 def build_script_qc_prompt(script: str) -> str:
     return (
         "Below is the FINAL narration script for an audiobook (already converted from a PhD "
-        "thesis - equations glossed, citations resolved, abbreviations expanded). Audit it for "
-        "RED FLAGS that would sound wrong when read aloud, and rate each by severity.\n\n"
+        "thesis - equations announced by number, citations resolved, abbreviations expanded). "
+        "Audit it for RED FLAGS that would sound wrong when read aloud, and rate each by "
+        "severity.\n\n"
         "Look for: raw LaTeX or math markup that leaked ('$', '\\frac', '<sup>', '_{'); a "
-        "garbled or nonsensical equation gloss; a citation that reads wrong (a dangling 'as "
+        "wrong or malformed equation announcement; a citation that reads wrong (a dangling 'as "
         "shown in', 'and others' with no name, a stray bracket); an abbreviation never "
         "expanded or expanded twice; a sentence cut off mid-thought; obvious OCR garble; a "
         "symbol that will be mispronounced. Severity HIGH = corrupts meaning or is clearly "
-        "broken (raw LaTeX, garbled gloss, wrong number); medium/low = awkward but "
+        "broken (raw LaTeX, OCR garble, wrong number); medium/low = awkward but "
         "understandable. Do NOT flag normal prose or stylistic choices.\n\n"
         "Return ONLY this JSON:\n"
         '{"summary":"one-paragraph readiness assessment","issues":[{"kind":"raw_latex|'

@@ -104,7 +104,7 @@ def build_context(
     """Context wired with real parser/bib adapters and a persistent FileCache.
 
     The LLM and TTS stay mocked by default so runs are offline and free. Pass
-    ``use_real_llm=True`` (CLI ``--llm anthropic``) for real glosses, and
+    ``use_real_llm=True`` (CLI ``--llm anthropic``) for the real structure map + curation, and
     ``use_real_tts=True`` (CLI ``--tts elevenlabs``) for the real ElevenLabs render +
     pronunciation publish + ffmpeg M4B mux. Both real paths cost money and need their
     API keys; the real render also needs ffmpeg on PATH.

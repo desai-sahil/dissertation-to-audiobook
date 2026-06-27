@@ -38,7 +38,7 @@ def markdown_to_document(markdown: str, *, title: str | None = None) -> Document
         block_id = f"m{seq}"
 
         # A standalone $$...$$ chunk is a display equation: keep the LaTeX so the math stage
-        # can gloss it, instead of letting raw LaTeX fall through as a spoken paragraph.
+        # can announce it by number, instead of letting raw LaTeX fall through as a paragraph.
         display = split_display_math(text)
         if display is not None:
             blocks.append(

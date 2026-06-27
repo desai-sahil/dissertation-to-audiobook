@@ -3,7 +3,7 @@
 Marker renders math as LaTeX ($$...$$ display, $...$ inline) and uses <sup>/<sub>/<br>
 markup; poppler produces none of this, so clean_markup is a no-op on clean prose and is
 safe to run parser-agnostically. Display equations are detected separately
-(split_display_math) and routed to the math gloss stage; this module turns INLINE math and
+(split_display_math) and routed to the math stage; this module turns INLINE math and
 markup into plain tokens (e.g. "psi xyl", "g s", "m squared") so raw LaTeX never reaches the
 audio. The curator/lexicon then map those tokens to their final spoken forms.
 """
