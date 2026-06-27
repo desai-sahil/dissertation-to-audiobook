@@ -95,9 +95,16 @@ uv run audiobook repair-extraction out/Jain_cornellgrad_0058F_13867.md --llm ant
 ### Phase 3 — Prepare the narration script
 
 `run` ingests the clean markdown and builds the reviewable script:
-build IR → **cartographer** (LLM structure map: chapters vs front/back matter) → select →
-math (announce equations) → figures (skip captions) → citations (author-year) → normalize →
-assemble. Artifacts are written **before** any TTS spend.
+build IR → **structurer** (LLM block-kind classifier) → **cartographer** (LLM structure map:
+chapters vs front/back matter) → select → math (announce equations) → figures (skip captions) →
+citations (author-year) → normalize → assemble. Artifacts are written **before** any TTS spend.
+
+The **structurer** is how block detection generalizes across theses without per-thesis regex:
+Opus labels each block's *kind* (prose / heading / equation / code / figure / table / reference
+/ frontmatter) and the deterministic layer renders or skips from the label — so a source-code
+appendix (fenced or spaced-out) is typed `code` and skipped, whatever the formatting. Claim-safe
+(it returns only a kind per block id, never text), and every type change is logged to
+`out/<slug>.structure-changes.md`. Disable with `--no-structurer`.
 
 ```bash
 uv run audiobook run sample/Jain_cornellgrad_0058F_13867.pdf \
@@ -167,6 +174,7 @@ runtime in the `.mp4` and embeds as album art in the `.m4b`/`.mp3`; omit it for 
 | `--profile committee\|general` | listener profile (see below) |
 | `--preview` | render the first chapter only, with the cheap flash model |
 | `--no-structure-eval` | skip the cartographer (use deterministic structure detection) |
+| `--no-structurer` | skip the LLM block-kind classifier (then deterministic types stand alone) |
 | `--no-curate` | skip the LLM pronunciation curator |
 | `--no-script-repair` | skip the guarded auto-repair (safe pronunciation fixes) |
 | `--no-script-qc` | skip the phase-4 pre-TTS script QC check |

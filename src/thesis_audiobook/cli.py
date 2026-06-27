@@ -49,6 +49,7 @@ from thesis_audiobook.script_qc import ScriptQcReport, render_script_qc_md
 from thesis_audiobook.script_repair import render_script_repair_report
 from thesis_audiobook.stages import build_default_pipeline
 from thesis_audiobook.stages.assemble_audio import slugify
+from thesis_audiobook.structurer import render_structure_changes
 
 app = typer.Typer(
     add_completion=False,
@@ -225,6 +226,13 @@ def run(
     no_curate: Annotated[
         bool, typer.Option("--no-curate", help="Skip the LLM pronunciation curator.")
     ] = False,
+    no_structurer: Annotated[
+        bool,
+        typer.Option(
+            "--no-structurer",
+            help="Skip the LLM block-kind classifier (corrects block types, e.g. detects code).",
+        ),
+    ] = False,
     no_structure_eval: Annotated[
         bool,
         typer.Option(
@@ -274,6 +282,7 @@ def run(
         parser_backend=_validate_parser(parser),
         output_mode=_validate_format(audio_format),
         curate=not no_curate,
+        structurer=not no_structurer,
         structure_eval=not no_structure_eval,
         script_repair=not no_script_repair,
         script_qc=not no_script_qc,
@@ -363,6 +372,12 @@ def run(
     structure_path = _write_structure_md(
         out, doc, ctx.structure_map, include_appendices=config.profile.include_appendices
     )
+    if ctx.reclassifications:
+        changes_path = out / f"{slug}.structure-changes.md"
+        changes_path.write_text(render_structure_changes(ctx.reclassifications), encoding="utf-8")
+        typer.echo(
+            f"  structurer reclassified {len(ctx.reclassifications)} block(s) - see {changes_path}"
+        )
     if ctx.script_repair_plan is not None and (
         ctx.script_repair_applied or ctx.script_repair_rejected
     ):

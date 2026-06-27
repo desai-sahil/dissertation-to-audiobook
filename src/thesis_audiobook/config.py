@@ -103,6 +103,9 @@ class Config(StrictModel):
     chunk_char_limit: int = 2000
     # LLM pronunciation curator (per-document). On by default; --no-curate disables it.
     curate: bool = True
+    # LLM block-kind classifier (the Structurer: corrects each block's type so non-narratable
+    # material like code is skipped). On by default; --no-structurer disables it.
+    structurer: bool = True
     # LLM thesis cartographer (structure map: include/skip regions). On by default;
     # --no-structure-eval disables it (then the build_ir heuristics stand alone).
     structure_eval: bool = True

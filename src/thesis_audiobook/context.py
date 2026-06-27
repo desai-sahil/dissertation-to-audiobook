@@ -26,6 +26,7 @@ from thesis_audiobook.pronunciation import DictionaryLocator, PronunciationLexic
 from thesis_audiobook.provenance import ProvenanceMap
 from thesis_audiobook.script_qc import ScriptQcReport
 from thesis_audiobook.script_repair import AppliedRepair, RejectedRepair, ScriptRepairPlan
+from thesis_audiobook.structurer import Reclassification
 from thesis_audiobook.warnings import WarningsSink
 
 
@@ -57,6 +58,10 @@ def _new_rejected() -> list[RejectedRepair]:
     return []
 
 
+def _new_reclass() -> list[Reclassification]:
+    return []
+
+
 @dataclass
 class Context:
     config: Config
@@ -75,6 +80,7 @@ class Context:
     pdf_bytes: bytes = b""
     cover_image: bytes | None = None
     structure_map: StructureMap | None = None
+    reclassifications: list[Reclassification] = field(default_factory=_new_reclass)
     script_qc_report: ScriptQcReport | None = None
     script_repair_plan: ScriptRepairPlan | None = None
     script_repair_applied: list[AppliedRepair] = field(default_factory=_new_applied)

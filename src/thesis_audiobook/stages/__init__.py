@@ -18,6 +18,7 @@ from thesis_audiobook.stages.normalize import NormalizeStage
 from thesis_audiobook.stages.script_qc import ScriptQcStage
 from thesis_audiobook.stages.script_repair import ScriptRepairStage
 from thesis_audiobook.stages.select import SelectStage
+from thesis_audiobook.stages.structurer import StructurerStage
 from thesis_audiobook.stages.tts import TtsStage
 
 
@@ -25,6 +26,7 @@ def default_stages() -> list[Stage]:
     return [
         IngestStage(),
         BuildIrStage(),
+        StructurerStage(),
         CartographerStage(),
         SelectStage(),
         CurateStage(),
