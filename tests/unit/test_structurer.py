@@ -129,12 +129,16 @@ def test_stage_no_suspects_makes_no_llm_call(tiny_ir_path: Path) -> None:
     assert doc.blocks[0].type is BlockType.paragraph and ctx.reclassifications == []
 
 
-def test_stage_mock_is_noop(tiny_ir_path: Path) -> None:
+def test_stage_warns_when_suspects_but_no_labels(tiny_ir_path: Path) -> None:
+    # mock LLM -> empty plan, but a suspect existed: must surface a warning, not silently pass
     ctx = build_mock_context(Config(), pdf_bytes=b"x", mock_ir=tiny_ir_path)
     doc = _doc_with_code()
-    StructurerStage().run(doc, ctx)  # suspect exists, but mock LLM -> empty plan -> no change
+    StructurerStage().run(doc, ctx)
     assert all(b.type is BlockType.paragraph for b in doc.blocks)
     assert ctx.reclassifications == []
+    assert any(
+        "returned\nno labels" in w.reason or "no labels" in w.reason for w in ctx.warnings.items
+    )
 
 
 def test_stage_disabled_skips(tiny_ir_path: Path) -> None:

@@ -40,6 +40,22 @@ class StructurerStage:
         if not suspects:
             return doc
         plan = self._plan(suspects, ctx)
+        if plan.is_empty():
+            # Suspects existed but the model returned nothing usable (e.g. a malformed JSON
+            # response). Fail-soft leaves those blocks as prose, so surface it loudly rather
+            # than silently narrate possible code; an uncached empty plan self-heals on re-run.
+            ctx.warnings.add(
+                LowConfidence(
+                    block_id=suspects[0].id,
+                    reason=(
+                        f"structurer: {len(suspects)} suspicious block(s) but the model returned "
+                        "no labels - possible code/non-prose left unskipped; re-run to retry"
+                    ),
+                    score=0.2,
+                )
+            )
+            ctx.log.info("structurer_empty", suspects=len(suspects))
+            return doc
         changes = apply_structure(doc.blocks, plan)
         ctx.reclassifications = changes
         for change in changes:
