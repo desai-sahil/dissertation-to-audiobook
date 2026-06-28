@@ -85,6 +85,36 @@ def test_narrate_document_routes_each_block() -> None:
     assert reasons == {"title": "review", "p2": "verifier"}
 
 
+def test_announce_hook_handles_equations_tables_and_subsection_headings() -> None:
+    from thesis_audiobook.equations import equation_announcement
+
+    blocks = [
+        _block("h1", "I. INTRODUCTION", BlockType.heading),  # chapter-start heading
+        Block(id="eq", type=BlockType.equation_display, text="x", latex=r"x = y \tag{1.2}"),
+        Block(id="eq0", type=BlockType.equation_display, text="z", latex=r"z = w"),  # unnumbered
+        Block(id="tab", type=BlockType.table, text="| a | b |"),
+        _block("sub", "I.A. Methods detail", BlockType.heading),  # subsection heading
+    ]
+
+    def announce(b: Block) -> str | None:
+        if b.type is BlockType.equation_display:
+            return equation_announcement(b.latex or b.text)
+        if b.type is BlockType.table:
+            return "A table is shown here."
+        return None
+
+    by = {b.id: b for b in blocks}
+    outcome = narrate_document(
+        blocks, map_structure_to_blocks(blocks, _MAP), generate=lambda _p: "x", announce=announce
+    )
+    assert by["eq"].spoken == "Equation one point two." and by["eq"].keep  # announced by number
+    assert by["eq0"].keep is False  # unnumbered equation -> skipped
+    assert by["tab"].spoken == "A table is shown here." and by["tab"].keep
+    assert outcome.announced == 2  # eq + table (bypass the verifier)
+    assert by["h1"].chapter == 1  # chapter-start heading keeps "Chapter N"
+    assert by["sub"].chapter is None  # subsection heading -> no repeated "Chapter N"
+
+
 def test_narration_is_bounded_per_block() -> None:
     # cost safety: a block that never verifies makes at most max_text_attempts calls, then stops.
     calls = {"n": 0}

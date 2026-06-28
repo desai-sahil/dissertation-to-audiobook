@@ -13,8 +13,10 @@ mechanical ways a constrained rewrite goes wrong:
                   Scope is decimals and percentages (number_to_words is the spelling oracle); bare
                   integers are out of scope on purpose - they are dominated by citation years,
                   reference numbers, and page numbers that a faithful rewrite correctly drops.
-  3. POLARITY   - negation/scope word counts are preserved (reuse copyedit), so a claim cannot flip.
-  4. DIRECTION  - increase/decrease/comparison word counts are preserved (reuse copyedit).
+  3. POLARITY   - negations exact (adding/dropping a "not" flips a claim) and scope words not
+                  dropped, while voicing-driven additions ("<" -> "less") are allowed.
+  4. DIRECTION  - net up/down preserved: a flip (up-only -> down-only) or total loss is flagged,
+                  but synonyms (higher -> greater) and voiced additions ("-" -> "negative") pass.
   5. PARAPHRASE - the spoken text does not inject many content words absent from the source, which
                   catches free composition / a hallucinated clause (a constrained rewrite stays
                   close to the source wording).
@@ -27,11 +29,41 @@ from __future__ import annotations
 
 import re
 import string
+from collections import Counter
 
-# Reuse the copy-edit guard's claim-safety helpers (same package; intentional shared seed).
-from thesis_audiobook.copyedit import content_words, direction_counts, polarity_counts
+# Reuse the copy-edit guard's content-word multiset (same package; intentional shared seed). The
+# polarity/direction COUNTS are handled here, not via copyedit's exact-equality helpers: v2's spoken
+# text voices symbols (< -> "less than", - / <0 -> "negative", > -> "greater"), which legitimately
+# adds these words, so the verifier needs a relaxed, voicing-aware check copyedit must not have.
+from thesis_audiobook.copyedit import content_words
 from thesis_audiobook.ir import StrictModel
 from thesis_audiobook.normalization.numbers import number_to_words
+
+# Word classes for the relaxed claim checks (see _verify_counts):
+#  - NEGATIONS: exact count (adding OR dropping a "not" flips meaning; voicing rarely adds them).
+#  - SCOPE: no-drop (don't lose "only"/"all"; voicing a "<" legitimately ADDS "less").
+#  - UP / DOWN: net direction; a true flip (up-only -> down-only) or total loss is the violation,
+#    while synonyms (higher -> greater) and voiced additions ("negative" for a "-") pass.
+_NEGATIONS = frozenset(
+    {"not", "no", "never", "none", "neither", "nor", "cannot", "without", "nothing", "nobody",
+     "hardly", "scarcely", "barely", "non"}
+)  # fmt: skip
+_SCOPE = frozenset(
+    {"only", "all", "every", "each", "both", "more", "less", "fewer", "most", "least", "any",
+     "some", "few", "many", "much"}
+)  # fmt: skip
+_UP = frozenset(
+    {"increased", "increase", "increases", "increasing", "rose", "rise", "rises", "risen",
+     "higher", "highest", "greater", "greatest", "positive", "positively", "above", "faster",
+     "doubled", "tripled", "quadrupled", "exceeded", "exceed", "gained", "gain", "upregulated"}
+)  # fmt: skip
+_DOWN = frozenset(
+    {"decreased", "decrease", "decreases", "decreasing", "fell", "fall", "falls", "fallen",
+     "lower", "lowest", "lesser", "negative", "negatively", "below", "under", "slower", "halved",
+     "lost", "loss", "downregulated"}
+)  # fmt: skip
+_WORD = re.compile(r"[a-z]+(?:'[a-z]+)?")
+_NEG_CONTRACTION = re.compile(r"[a-z]+n't")
 
 VERIFIER_VERSION = "verifier-v1"
 
@@ -106,8 +138,10 @@ def _verify_speakable(spoken: str) -> list[Violation]:
 
 
 def _verify_values(source: str, spoken: str) -> list[Violation]:
-    """Each source value (spelled by the oracle) must appear in the spoken text, in order."""
-    body = _norm(spoken)
+    """Each source value (spelled by the oracle) must appear in the spoken text, in order. The
+    oracle spells a leading '-' as "minus"; the narrator may voice it "negative", so the two are
+    treated as the same sign here (a fully dropped sign still fails, catching a sign flip)."""
+    body = re.sub(r"\bnegative\b", "minus", _norm(spoken))
     violations: list[Violation] = []
     cursor = 0
     for token in _source_value_tokens(source):
@@ -130,22 +164,50 @@ def _verify_values(source: str, spoken: str) -> list[Violation]:
     return violations
 
 
+def _negations(text: str) -> Counter[str]:
+    counts: Counter[str] = Counter(w for w in _WORD.findall(text.lower()) if w in _NEGATIONS)
+    contractions = len(_NEG_CONTRACTION.findall(text.lower()))
+    if contractions:
+        counts["n't"] += contractions
+    return counts
+
+
 def _verify_counts(source: str, spoken: str) -> list[Violation]:
+    """Relaxed, voicing-aware claim checks: negations exact, scope no-drop, direction net up/down.
+    Permits the narrator to ADD direction/scope words when voicing symbols (< -> less, - ->
+    negative) while still catching a dropped negation, a lost qualifier, or a reversed finding."""
     violations: list[Violation] = []
-    if polarity_counts(source) != polarity_counts(spoken):
+
+    src_neg, spk_neg = _negations(source), _negations(spoken)
+    if src_neg != spk_neg:
         violations.append(
             Violation(
-                kind="polarity",
-                detail=f"negation/scope changed: {dict(polarity_counts(source))} -> "
-                f"{dict(polarity_counts(spoken))}",
+                kind="polarity", detail=f"negation changed: {dict(src_neg)} -> {dict(spk_neg)}"
             )
         )
-    if direction_counts(source) != direction_counts(spoken):
+
+    src_words = Counter(_WORD.findall(source.lower()))
+    spk_words = Counter(_WORD.findall(spoken.lower()))
+    dropped_scope = sorted(w for w in _SCOPE if spk_words[w] < src_words[w])
+    if dropped_scope:
+        violations.append(
+            Violation(kind="polarity", detail=f"scope word(s) dropped: {dropped_scope}")
+        )
+
+    su = sum(src_words[w] for w in _UP)
+    sd = sum(src_words[w] for w in _DOWN)
+    ku = sum(spk_words[w] for w in _UP)
+    kd = sum(spk_words[w] for w in _DOWN)
+    flipped = (su > 0 and sd == 0 and kd > 0 and ku == 0) or (
+        sd > 0 and su == 0 and ku > 0 and kd == 0
+    )
+    lost = su + sd > 0 and ku + kd == 0
+    if flipped or lost:
+        what = "reversed" if flipped else "lost"
         violations.append(
             Violation(
                 kind="direction",
-                detail=f"direction words changed: {dict(direction_counts(source))} -> "
-                f"{dict(direction_counts(spoken))}",
+                detail=f"direction {what}: source up/down {su}/{sd} -> spoken {ku}/{kd}",
             )
         )
     return violations

@@ -30,6 +30,18 @@ def test_structural_announcements(tiny_ir_path: Path) -> None:
     assert "Section two point one, Gas exchange." in script
 
 
+def test_heading_announcement_strips_leading_enumerator() -> None:
+    from thesis_audiobook.ir import Block, BlockType
+    from thesis_audiobook.stages.assemble_script import _heading_announcement
+
+    chapter = Block(id="a", type=BlockType.heading, text="I. INTRODUCTION", chapter=1)
+    assert _heading_announcement(chapter) == "Chapter one. INTRODUCTION."  # roman "I." dropped
+    subsection = Block(id="b", type=BlockType.heading, text="III.A.1. Substrates")
+    assert _heading_announcement(subsection) == "Substrates."  # bare title, no "Chapter N"
+    plain = Block(id="c", type=BlockType.heading, text="Methods", chapter=2)
+    assert _heading_announcement(plain) == "Chapter two. Methods."  # untouched, no enumerator
+
+
 def test_figure_caption_placed_at_first_reference(tiny_ir_path: Path) -> None:
     script = _script(tiny_ir_path)
     ref_index = script.index("As shown in Figure one")

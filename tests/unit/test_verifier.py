@@ -74,6 +74,38 @@ def test_direction_flip_is_caught() -> None:
     }
 
 
+def test_direction_synonym_passes() -> None:
+    # higher -> greater is the same direction (up); a faithful rewrite, not a flip.
+    assert verify_segment("the signal was higher", "the signal was greater").ok
+
+
+def test_total_loss_of_direction_is_caught() -> None:
+    assert _kinds("expression increased in mutants", "expression changed in mutants") == {
+        "direction"
+    }
+
+
+def test_voicing_a_symbol_into_direction_or_scope_passes() -> None:
+    # the narrator voices "< 0" as "negative" and "<" as "less than": ADDING direction/scope words
+    # is allowed (it is the narrator's job); only drops/flips are violations.
+    assert verify_segment(
+        "the change was significant at p < 0.05",
+        "the change was significant at p less than zero point zero five",
+    ).ok
+    assert verify_segment(
+        "the slope delta was -2.0", "the slope delta was negative two point zero"
+    ).ok
+
+
+def test_dropped_scope_word_is_caught() -> None:
+    assert _kinds("only the mutant responded", "the mutant responded") == {"polarity"}
+
+
+def test_added_negation_is_caught() -> None:
+    # voicing never introduces a "not"; adding one flips the claim, so it is flagged.
+    assert _kinds("the effect was significant", "the effect was not significant") == {"polarity"}
+
+
 # --- speakable allowlist ---
 
 

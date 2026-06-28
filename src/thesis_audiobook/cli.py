@@ -146,6 +146,7 @@ def _write_v2_pairs(out: Path, doc: Document, ctx: Context) -> Path:
         "counts": (
             {
                 "narrated": outcome.narrated,
+                "announced": outcome.announced,
                 "held": outcome.held,
                 "skipped": outcome.skipped,
                 "reviewed": outcome.reviewed,
@@ -656,8 +657,8 @@ def run_v2(
     typer.echo(f"  faithfulness pairs: {pairs_path}")
     if counts is not None:
         typer.echo(
-            f"  segments          : {counts.narrated} narrated, {counts.held} held, "
-            f"{counts.skipped} skipped, {counts.reviewed} review"
+            f"  segments          : {counts.narrated} narrated, {counts.announced} announced, "
+            f"{counts.held} held, {counts.skipped} skipped, {counts.reviewed} review"
         )
     typer.echo(
         "  no paid calls were made (LLM mocked)."

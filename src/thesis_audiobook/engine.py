@@ -39,6 +39,7 @@ class BlockAssignment(StrictModel):
     decision: str  # read | skip | review
     kind: str  # the governing section's kind, or "unmapped"
     chapter: int | None  # 1-based body-chapter index when in a body chapter, else None
+    section_head: bool = False  # this heading is the section's start (matched a vision section)
 
 
 class SegmentPair(StrictModel):
@@ -56,7 +57,8 @@ class FlaggedSegment(StrictModel):
 class EngineOutcome(StrictModel):
     pairs: list[SegmentPair] = []  # every attempted narration (ok or not) for faithfulness scoring
     flagged: list[FlaggedSegment] = []
-    narrated: int = 0  # shipped (passed the verifier)
+    narrated: int = 0  # prose shipped (passed the verifier)
+    announced: int = 0  # equations/tables announced deterministically (bypass the verifier)
     held: int = 0  # narrated but failed the verifier -> not shipped
     skipped: int = 0
     reviewed: int = 0  # unmapped / review-kind -> not shipped, surfaced
@@ -92,13 +94,15 @@ def map_structure_to_blocks(
     cur_decision, cur_kind = "review", "unmapped"
     cur_chapter: int | None = None
     for block in blocks:
+        is_section_head = False
         if block.type is BlockType.heading:
             hit = section_by_key.get(_heading_key(block.text))
             if hit is not None:
                 cur_kind, cur_chapter = hit
                 cur_decision = section_decision(cur_kind)
+                is_section_head = True
         result[block.id] = BlockAssignment(
-            decision=cur_decision, kind=cur_kind, chapter=cur_chapter
+            decision=cur_decision, kind=cur_kind, chapter=cur_chapter, section_head=is_section_head
         )
     return result
 
@@ -108,12 +112,15 @@ def narrate_document(
     assignments: dict[str, BlockAssignment],
     *,
     generate: Callable[[str], str],
+    announce: Callable[[Block], str | None] | None = None,
     vision_for: Callable[[Block], Callable[[str], str] | None] | None = None,
     max_text_attempts: int = 2,
 ) -> EngineOutcome:
-    """Narrate the read prose blocks in place; skip the rest. Bounded and single-pass (see module
-    docs). `generate` is the text model; `vision_for(block)` optionally returns a per-block vision
-    generator for escalation (None = text-only, the first-cut default)."""
+    """Narrate the read prose blocks in place; announce/skip the rest. Bounded and single-pass (see
+    module docs). `generate` is the text model; `announce(block)` returns a deterministic
+    announcement for a non-prose block (equation/table) or None to skip it - announcements BYPASS
+    the verifier, since they deliberately omit the source's symbols. `vision_for(block)` optionally
+    returns a per-block vision generator for escalation (None = text-only first cut)."""
     outcome = EngineOutcome()
     for block in blocks:
         assignment = assignments.get(block.id)
@@ -134,11 +141,23 @@ def narrate_document(
 
         # decision == read
         if block.type is BlockType.heading:
-            block.keep = True  # assemble_script announces the heading deterministically
+            block.keep = True
+            if not assignment.section_head:
+                # a subsection heading: announce its bare title (not "Chapter N" again) and let it
+                # fold into the chapter audio (chapter=None is forward-filled downstream).
+                block.chapter = None
             continue
         if block.type not in NARRATABLE_TYPES or not block.text.strip():
-            block.keep = False  # non-prose in a read section: not narrated in this cut
-            outcome.skipped += 1
+            # non-prose (equation/table/figure): announce deterministically if the hook handles it,
+            # else skip. Announcements bypass the verifier (they omit the source's symbols).
+            announcement = announce(block) if announce is not None else None
+            if announcement:
+                block.spoken = announcement
+                block.keep = True
+                outcome.announced += 1
+            else:
+                block.keep = False
+                outcome.skipped += 1
             continue
 
         vision_generate = vision_for(block) if vision_for is not None else None
