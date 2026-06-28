@@ -64,21 +64,31 @@ class EngineOutcome(StrictModel):
     reviewed: int = 0  # unmapped / review-kind -> not shipped, surfaced
 
 
+_ENUMERATOR = re.compile(r"^(?:[IVXLCDM]+|\d+)(?:\.[A-Za-z0-9]+)*\.?\s+")
+
+
+def strip_heading_enumerator(text: str) -> str:
+    """Drop a leading heading enumerator ('I.', 'III.A.1.', '2.3'), leaving only the title words."""
+    stripped = _ENUMERATOR.sub("", text).strip()
+    return stripped or text
+
+
 def _heading_key(text: str) -> str:
-    """Normalize a heading (or a vision section's number + title) to a comparable key: lowercase,
-    non-alphanumeric collapsed to spaces. 'VII. REFERENCES' and 'VII REFERENCES' both -> 'vii
-    references'; a subsection 'III.A. ...' -> 'iii a ...' won't collide with chapter 'iii ...'."""
-    return " ".join(re.sub(r"[^a-z0-9]+", " ", text.lower()).split())
+    """A comparable key from a heading's TITLE: drop a leading enumerator, lowercase, collapse
+    non-alphanumeric. So 'I. INTRODUCTION' and 'INTRODUCTION' both -> 'introduction' - matching on
+    the title (not the number) is what bridges Zhu (number in the heading text) and Gao (number is a
+    separate 'CHAPTER N' divider the IR strips, and vision's number field is noisy)."""
+    return " ".join(re.sub(r"[^a-z0-9]+", " ", strip_heading_enumerator(text).lower()).split())
 
 
 def map_structure_to_blocks(
     blocks: list[Block], structure_map: VisionStructureMap
 ) -> dict[str, BlockAssignment]:
     """Anchor the vision sections to the IR's own heading blocks (robust to vision's page-number
-    drift). Each top-level vision section is matched to the heading whose printed text it labels;
-    its read/skip decision then propagates, in document order, to that heading and the blocks under
-    it until the next matched section. Blocks before the first match are 'review' (never silently
-    read or dropped). A 1-based chapter index is assigned to body chapters in section order."""
+    drift and noisy numbering). Each top-level vision section is matched to the heading whose TITLE
+    it labels; its read/skip decision then propagates, in document order, to that heading and the
+    blocks under it until the next matched section. Blocks before the first match are 'review'
+    (never silently read or dropped). Body chapters get a 1-based index in section order."""
     section_by_key: dict[str, tuple[str, int | None]] = {}
     chapter_no = 0
     for section in structure_map.sections:
@@ -86,7 +96,7 @@ def map_structure_to_blocks(
         if section.kind.strip().lower() == "body_chapter":
             chapter_no += 1
             chapter = chapter_no
-        key = _heading_key(f"{section.number} {section.title}")
+        key = _heading_key(section.title)  # match on the title; vision's number field is unreliable
         if key:
             section_by_key[key] = (section.kind, chapter)
 

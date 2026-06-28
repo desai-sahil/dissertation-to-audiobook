@@ -85,6 +85,28 @@ def test_narrate_document_routes_each_block() -> None:
     assert reasons == {"title": "review", "p2": "verifier"}
 
 
+def test_match_is_by_title_not_number() -> None:
+    # Gao-style: vision puts the number in its noisy `number` field ("1", "CHAPTER 3"), but the IR
+    # heading text has none (Marker's "CHAPTER N" divider was stripped). Matching on the title
+    # bridges this and Zhu's number-in-text headings; otherwise the chapters fall through to skip.
+    smap = VisionStructureMap(
+        sections=[
+            VisionSection(number="1", title="Introduction", kind="body_chapter"),
+            VisionSection(number="CHAPTER 3", title="Results and Discussion", kind="body_chapter"),
+        ]
+    )
+    blocks = [
+        _block("h1", "INTRODUCTION", BlockType.heading),
+        _block("p1", "some prose"),
+        _block("h2", "RESULTS AND DISCUSSION", BlockType.heading),
+        _block("p2", "more prose"),
+    ]
+    a = map_structure_to_blocks(blocks, smap)
+    assert a["h1"].decision == "read" and a["h1"].chapter == 1
+    assert a["h2"].decision == "read" and a["h2"].chapter == 2
+    assert a["p1"].chapter == 1 and a["p2"].chapter == 2
+
+
 def test_announce_hook_handles_equations_tables_and_subsection_headings() -> None:
     from thesis_audiobook.equations import equation_announcement
 

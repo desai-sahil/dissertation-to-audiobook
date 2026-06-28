@@ -12,10 +12,9 @@ partitions those segments, so the chunk-conservation invariant holds by construc
 
 from __future__ import annotations
 
-import re
-
 from thesis_audiobook.chunking import ScriptSegment, plan_chunks
 from thesis_audiobook.context import Context
+from thesis_audiobook.engine import strip_heading_enumerator
 from thesis_audiobook.ir import Block, BlockType, Document, DocumentMeta
 from thesis_audiobook.lexicon import Lexicon
 from thesis_audiobook.normalization import normalize_all
@@ -23,10 +22,6 @@ from thesis_audiobook.normalization.numbers import int_to_words, section_to_word
 
 _BREAK = '<break time="0.8s"/>'
 _GAP = "\n\n"
-# A leading heading enumerator: roman or arabic, with optional .letter/.number segments, ending in a
-# period + space. Stripped from the announced TITLE so "I. INTRODUCTION" reads "Introduction" (the
-# chapter number is announced separately) and "III.A.1. Substrates" reads "Substrates".
-_ENUMERATOR = re.compile(r"^(?:[IVXLCDM]+|\d+)(?:\.[A-Za-z0-9]+)*\.?\s+")
 
 
 def model_supports_breaks(model_id: str) -> bool:
@@ -34,13 +29,10 @@ def model_supports_breaks(model_id: str) -> bool:
     return "v3" not in model_id
 
 
-def _strip_enumerator(title: str) -> str:
-    stripped = _ENUMERATOR.sub("", title).strip()
-    return stripped or title  # never blank out a heading that is only an enumerator
-
-
 def _heading_announcement(block: Block) -> str:
-    title = _strip_enumerator(block.current_text())
+    # Strip the leading enumerator so "I. INTRODUCTION" reads "Introduction" (the chapter number is
+    # announced separately) and "III.A.1. Substrates" reads "Substrates".
+    title = strip_heading_enumerator(block.current_text())
     if block.section:
         return f"Section {section_to_words(block.section)}, {title}."
     if block.chapter is not None:
