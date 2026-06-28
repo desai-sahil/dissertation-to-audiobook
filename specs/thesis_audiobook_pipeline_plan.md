@@ -214,7 +214,7 @@ isolated.
 
 ---
 
-## 7. The v2 direction (invert the split, ground in vision, gate on a corpus)
+## 7. The v2 engine (built): invert the split, ground in vision, gate on a corpus
 
 Principle 4 above warned against a "per-thesis regex treadmill." Running real theses showed the
 treadmill survives even with LLM labels, because it moved into the *renderer*: deterministic code
@@ -222,7 +222,7 @@ that turns labels into spoken text must enumerate an open set of surface forms (
 every chapter-heading scheme, every notation glyph). Zhu broke exactly there - roman-numeral,
 span-wrapped headings yielded zero detected chapters, and citation/markup leaked into the narration.
 
-The v2 reframe (decided; the build is gated on the eval harness):
+The v2 reframe (built and validated on the corpus; the `run-v2` command):
 
 1. **Invert the labor split.** The model produces the *spoken text* (a constrained, faithful rewrite:
    expand units/numbers, drop citation markers of any form, announce equations by number, keep every
@@ -243,9 +243,16 @@ semantic swap. Faithfulness therefore rests on the model + a vision QC judge + *
 is why the corpus + eval harness was built first (build spec, section 7.6): it is the only thing that
 measures the residual drift v2 introduces, and the bar v2 must clear.
 
-**Target v2 pipeline.** PDF -> page images (ground truth) + light text as an alignment aid only -> a
-vision structure pass (the cartographer, grounded) -> per-segment faithful-rewrite generation
-(retiring the deterministic normalizer) -> the deterministic verifier -> an optional vision QC sweep
--> then assemble/TTS/provenance kept wholesale. Low structure confidence or a high verifier-failure
-rate routes a thesis to human review instead of shipping confidently-broken audio. Phases land one at
-a time, each required to beat the Phase-1 baseline on its target dimension before it ships.
+**The v2 pipeline (as built, `run-v2`).** PDF -> page images (poppler, ground truth) + light per-page
+text as a block->page alignment aid only -> a vision structure pass (the cartographer, grounded:
+labels section *kinds*, read vs skip) -> a verifier-gated narrator: the model writes the spoken text
+for each read segment, the deterministic verifier checks invariants, and a failure re-narrates then
+escalates to the **page image** (vision QC, with the page as ground truth) before the segment is held
+-> non-prose is announced (equations by number) or skipped -> then assemble/lexicon/TTS/assembly are
+reused wholesale from v1. The cover is **generated** from the title + author unless `--cover` is
+given. A confidence gate (held-or-flagged rate) stops a billed render of confidently-broken audio
+unless `--force`; `--preview` renders only the first chapter for a cheap end-to-end check. The TTS
+cache key includes the backend (mock vs elevenlabs), so a mock render's silent audio is never served
+to a real one. Validated across Gao, Zhu, and Jain (faithfulness ~0.96-0.995); a high held/flagged
+rate routes a thesis to human review instead of shipping confidently-broken audio. The v1 `run`
+command is unchanged and remains available.

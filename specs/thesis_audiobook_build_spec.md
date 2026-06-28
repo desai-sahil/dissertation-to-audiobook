@@ -86,15 +86,20 @@ thesis-audiobook/
     script_repair.py copyedit.py                       # the writer + the copy-edit guard
     script_qc.py ledger.py                             # phase-4 QC report + the update ledger
     chunking.py                                        # pure chunk planner
+    # --- v2 vision-grounded engine (run-v2): the model narrates, the verifier checks invariants ---
+    vision_structure.py verifier.py narrate.py engine.py page_align.py equations.py
+    adapters/cover.py          # generated cover (title+author onto the template); assets/fonts/ below
     stages/                   # one module per stage; pure or port-mediated, never import adapters
       ingest.py build_ir.py structurer.py cartographer.py select.py curate.py
       math.py figures.py citations.py normalize.py appendix_signpost.py
       assemble_script.py script_repair.py script_qc.py lexicon.py tts.py assemble_audio.py
+      vision_cartographer.py narrate.py page_align.py   # v2 stages (vision structure + narrator)
     normalization/            # pure rules engine, no I/O, the most-tested code
       numbers.py units.py stats.py acronyms.py greek.py latex.py
       mojibake.py repetition.py segmentation.py
-    ports/                    # Protocols only (see section 2)
-    adapters/                 # real adapters + mocks.py + status.py
+    ports/                    # Protocols only (see section 2); incl. vision.py (VisionClient)
+    adapters/                 # real adapters + mocks.py + status.py + cover.py + pdf_render.py
+    assets/fonts/             # bundled OFL fonts for the generated cover (Newsreader, Space Mono)
     data/                     # pronunciation.json + profiles/{committee,general}.toml
   tests/
     conftest.py               # shared fixtures + autouse cost guard
@@ -103,8 +108,8 @@ thesis-audiobook/
   eval/                       # generalization gate (see 7.6): scorers + labeled corpus + scorecard
     score.py                  # pure per-dimension scorers (output vs labels; architecture-agnostic)
     run.py                    # score the corpus -> scorecard.{md,json} (offline)
-    corpus/<id>/              # labels.json + result.json + script.md snapshot (Gao, Zhu)
-    scorecard.md              # the committed v1 baseline the v2 rebuild must beat
+    corpus/<id>/              # labels.json + result.json + script.md snapshot (Gao, Zhu, Jain)
+    scorecard.md              # the committed v1 baseline; v2 (run-v2) is built + validated on it
 ```
 
 Rule of thumb: if a file under `normalization/` or `stages/` imports an SDK, `httpx`, or touches
@@ -213,10 +218,10 @@ adds an output-vs-labels gate. `eval/score.py` (pure, unit-tested) scores a prod
 per dimension (structure, citation/markup strip, value preservation, raw-token leak) against
 `eval/corpus/<id>/labels.json`; `eval/run.py` writes `eval/scorecard.md`. The scorers are
 architecture-agnostic - they grade output, not how it was produced - so the same scorecard grades v1
-and the planned v2. The committed scorecard is the v1 baseline; it runs offline (it scores committed
+and v2. The committed scorecard is the v1 baseline; it runs offline (it scores committed
 `script.md` snapshots), and `tests/unit/test_eval_score.py` pins the baseline numbers so a regression
-is caught by the normal suite. This is the acceptance gate for the v2 direction (functional spec,
-section 7).
+is caught by the normal suite. This was the acceptance gate for the v2 engine (functional spec,
+section 7), now built and validated against it (faithfulness ~0.96-0.995 across Gao, Zhu, Jain).
 
 ---
 
@@ -225,7 +230,8 @@ section 7).
 Commands map to phases and gates, so a human (or a test) can run any slice.
 
 ```
-audiobook run INPUT.pdf [--markdown CLEAN.md] [--llm anthropic] [--tts mock|elevenlabs] ...
+audiobook run    INPUT.pdf [--markdown CLEAN.md] [--llm anthropic] [--tts ...] ...   # v1 engine
+audiobook run-v2 INPUT.pdf  --markdown CLEAN.md  [--llm anthropic] [--tts ...] ...   # v2 engine
 audiobook parse INPUT.pdf -o ir.json                  # phases 1-2 -> IR JSON
 audiobook check-extraction  MARKER.md --llm anthropic # audit the raw markdown (read-only)
 audiobook repair-extraction MARKER.md --llm anthropic # two-pass guarded cleanup + de-shred -> *.cleaned.md
@@ -239,11 +245,23 @@ markdown; sets `--parser markdown`), `--llm mock|anthropic`, `--llm-model`, `--v
 `--no-structurer`, `--no-structure-eval`, `--no-curate`, `--no-script-repair`, `--as-written`
 (strict notation-only, copy-edit off), `--no-script-qc`, `--force` (render past a HIGH QC flag).
 
+`run-v2` reads page images (vision cartographer) and narrates through the verifier, then reuses the
+same lexicon/TTS/assembly tail to produce the audiobook. Its flags: `--markdown PATH` (the narration
+source; required), `--llm mock|anthropic`, `--llm-model`, `--dpi` (page render), `--tts
+mock|elevenlabs`, `--format m4b|mp4|mp3`, `--cover` (omit to GENERATE one from the title+author),
+`--voice`, `--preview` (first chapter + front matter only, to its own `preview/` subdir), `--force`
+(render past a NEEDS-REVIEW confidence gate), `--profile`. The TTS cache key includes the backend, so
+a mock render never poisons a real one.
+
 ---
 
 ## 9. Claim-safety: constrained LLM output + deterministic guards
 
-This is the architectural heart and the reason the LLM cannot hallucinate narration.
+This is the architectural heart of **v1** and the reason its LLM cannot hallucinate narration. The
+**v2** engine (`run-v2`) deliberately trades this by-construction safety for *bounded error*: the
+model writes the spoken text and the deterministic **verifier** is the floor (functional spec,
+section 7). The guards below still apply to v2's non-narration stages, and the verifier reuses the
+same value/polarity/direction helpers.
 
 - **Constrained output.** Every model-driven stage returns a typed, restricted shape: the
   structurer returns a block-kind per id; the cartographer returns `Region`s (enums + existing
@@ -340,13 +358,21 @@ stages) and `verifier_model` (Opus, the QC sweep/confirm); `parser_backend`, `ma
   author **copy-edit** stage + `copyedit_guard` (NotebookLM-style listenability without altering
   claims); the **update ledger**; and the live **status spinner** (`StatusReporter`). Each landed
   with an adversarial review of its guards and full suite/lint/type green.
-- **Eval harness + v2 reframe (current).** A labeled corpus + pure per-dimension scorers (`eval/`,
+- **Eval harness + v2 reframe.** A labeled corpus + pure per-dimension scorers (`eval/`,
   section 7.6) that quantify generalization across theses, committed as the v1 baseline (Gao clean;
-  Zhu fails structure/citation/value). This is the acceptance gate for the **v2 direction**
+  Zhu fails structure/citation/value). This was the acceptance gate for the **v2 engine**
   (functional spec, section 7): invert the labor split (the model produces faithful spoken text;
   deterministic code verifies invariants) and ground the hard parts in page images, so the verifier
-  generalizes where the surface-form renderer did not. *Harness green; v2 build phases gated on the
-  baseline.*
+  generalizes where the surface-form renderer did not. *Green.*
+- **v2 engine (current, `run-v2`).** The full vision-grounded engine: a `VisionClient` port +
+  Claude/poppler adapters; the deterministic **verifier** (faithfulness floor); the **vision
+  cartographer** (read/skip section kinds from page images); the **verifier-gated narrator** with
+  page-image escalation for held segments; block->page alignment; and the **audio last mile** -
+  `run-v2` runs through lexicon/TTS/assembly to produce the actual audiobook, with a **generated
+  cover** (title+author onto the template, bundled Newsreader + Space Mono), `--preview` (first
+  chapter), a confidence gate before billed TTS, and a TTS cache key that includes the backend (so a
+  mock render never serves silent audio to a real one). Validated across Gao, Zhu, Jain (faithfulness
+  ~0.96-0.995). *Green.*
 
 **Definition of done (per change):** ruff clean; `pyright` 0 errors on `src`; offline suite green;
 goldens unchanged or intentionally updated; no test triggered a live call; any new regex/guard

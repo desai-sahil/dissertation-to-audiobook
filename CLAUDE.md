@@ -35,9 +35,13 @@ wins on structure and testing.
 
 ## Build order
 
-Milestones M0 to M5 are defined in section 13 of the engineering spec. Do not start
-a milestone before the previous one is green. The current milestone is M0 (walking
-skeleton: every stage runs end-to-end on mock adapters, no real logic).
+The build history is section 13 of the engineering spec. Milestones M0 to M6 (deterministic
+core, parsing, LLM stages, TTS + assembly, hardening, cartographer), the post-M6 era
+(markdown ingestion, structurer, extraction repair, QC loop, copy-edit, ledger), and the
+**eval harness + v2 engine** are all green. The current engine is **v2** (vision-grounded,
+`run-v2`): the model narrates faithful spoken text and a deterministic verifier checks
+invariants, grounded in page images, gated on the corpus (functional spec, section 7). The
+v1 `run` command is unchanged and remains available.
 
 ## Common commands
 

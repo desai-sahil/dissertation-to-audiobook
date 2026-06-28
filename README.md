@@ -13,16 +13,19 @@ PDF --(Marker)--> markdown --(QC: audit + guarded repair)--> clean markdown
 
 Every transform is pure and deterministic; all I/O (PDF parsing, LLM, TTS, ffmpeg, cache)
 lives in adapters behind ports. The same input and config produce the same script
-byte-for-byte, and rendered audio is content-addressed cached, so re-renders are free. The
-LLM never writes spoken prose from scratch: it only labels structure and pronunciation, and
-rendering is deterministic, so it cannot hallucinate narration.
+byte-for-byte, and rendered audio is content-addressed cached, so re-renders are free.
 
-Status: the deterministic normalization core, real parsing (Marker/MinerU markdown, or an
-offline poppler fallback), an LLM **cartographer** that maps document structure, a
-pronunciation **curator**, a two-pass **extraction QC**, a **pre-TTS script QC gate**,
-ElevenLabs TTS + ffmpeg assembly, and TOML-driven profiles are all in place and validated
-end to end on a full 360-page thesis. Offline runs use deterministic mocks (silent audio,
-no model calls); real audio needs the keys below.
+**Two engines.** The original **v1** (`run`) is claim-safe *by construction*: the LLM only
+labels structure and pronunciation, deterministic code renders the spoken text, so it cannot
+hallucinate narration. The current **v2** (`run-v2`, recommended) inverts that split to
+generalize across theses: the LLM writes the faithful spoken text and a **deterministic
+verifier** is the floor (every value preserved and in order, no invented number or claim,
+polarity/direction intact, near-paraphrase not free composition), with the hard parts
+grounded in the **page image**. See [The v2 engine](#the-v2-engine-run-v2-recommended) below.
+
+Status: both engines run end to end and are validated on real theses (Gao, Zhu, Jain;
+faithfulness ~0.96-0.995). Offline runs use deterministic mocks (silent audio, no model
+calls); real audio needs the keys below.
 
 ## What is read, and what is skipped
 
@@ -35,6 +38,68 @@ no model calls); real audio needs the keys below.
   bibliography is not parsed or read.
 - **Front matter** (abstract, biographical sketch, acknowledgements, dedication) is read;
   the table of contents, list of figures/tables, and appendices are skipped.
+
+## The v2 engine (`run-v2`, recommended)
+
+v2 is vision-grounded and generalizes across theses without a per-thesis surface-form
+treadmill. Instead of deterministic code rendering spoken text from LLM labels (v1), the
+**LLM writes the spoken text** and a **deterministic verifier** is the faithfulness floor.
+
+```
+PDF --> page images (ground truth) + per-page text (alignment aid)
+    --> vision cartographer (read vs skip section kinds)
+    --> verifier-gated narrator (re-narrate, then escalate to the page image, else hold)
+    --> announce equations / skip non-prose --> assemble
+    --> cached TTS --> M4B / MP4 / MP3 + generated cover + provenance
+```
+
+- **Vision cartographer** reads the page images and labels each top-level section's *kind*
+  (body chapter, abstract, acknowledgements, references, appendix, ...), so structure is
+  recognized semantically rather than by heading regex. Read/skip policy is the same as above.
+- **Verifier-gated narrator.** For each read segment the model writes the spoken text; the
+  deterministic verifier (`verifier.py`) checks invariants — values preserved and in order, no
+  invented number/claim, negation/scope/direction intact, near-paraphrase not free
+  composition, a speakable-character allowlist. On a failure it re-narrates, then **escalates
+  to the page image** (the page is ground truth) before holding the segment for review.
+- **Generated cover.** Unless you pass `--cover`, v2 renders the title + author onto
+  `cover/cover - generic.png` (Newsreader title, Space Mono labels) → `out/<slug>.cover.png`.
+- **Cost safety.** `--tts mock` is the free default; a high held/flagged rate prints
+  NEEDS REVIEW and stops before a billed ElevenLabs render unless `--force`. The TTS cache key
+  includes the backend, so a mock render's silent audio is never served to a real one.
+
+```bash
+# free end-to-end dry check (mock TTS): script + cover + cost estimate, no billing
+uv run audiobook run-v2 sample/Jain_cornellgrad_0058F_13867.pdf \
+  --markdown out/Jain_cornellgrad_0058F_13867.cleaned.md \
+  --llm anthropic --format mp4 --preview
+
+# the real render (billed ElevenLabs), MP4 + MP3 with the generated cover
+export ANTHROPIC_API_KEY=...  ELEVENLABS_API_KEY=...  ELEVENLABS_VOICE_ID=...
+uv run audiobook run-v2 sample/Jain_cornellgrad_0058F_13867.pdf \
+  --markdown out/Jain_cornellgrad_0058F_13867.cleaned.md \
+  --llm anthropic --tts elevenlabs --format mp4 --preview   # drop --preview for the whole book
+```
+
+Outputs land in `out/` (and `out/preview/` for `--preview`): the chaptered `.mp4`/`.m4b` +
+whole-book `.mp3` (cover shown/embedded), `.cover.png`, `.script.md`, `.v2-pairs.json`
+(source/spoken faithfulness pairs), and `.provenance.json`.
+
+| `run-v2` flag | Meaning |
+|---|---|
+| `--markdown <path>` | the narration source markdown (required) |
+| `--llm mock\|anthropic` | vision + narration (anthropic costs money; bounded calls, all cached) |
+| `--llm-model <id>` | model for vision + narration (default `claude-sonnet-4-6`) |
+| `--dpi <n>` | page-render DPI for the vision read (default 100) |
+| `--tts mock\|elevenlabs` | speech synthesis (elevenlabs costs money; needs ffmpeg) |
+| `--format m4b\|mp4\|mp3` | chaptered file (m4b/mp4) + a whole-book mp3; `mp3` emits only the mp3 |
+| `--cover <path>` | cover image; **omit to generate one** from the title + author |
+| `--voice <id>` | ElevenLabs voice id (or set `ELEVENLABS_VOICE_ID`) |
+| `--preview` | render only the first chapter + front matter (to `out/preview/`) |
+| `--force` | render even if the confidence gate flags NEEDS REVIEW |
+| `--profile committee\|general` | listener profile |
+
+The rest of this README documents the **v1** `run` engine, whose deterministic core (parsing,
+normalization, the QC loop, TTS/assembly) v2 reuses wholesale for everything after narration.
 
 ## Prerequisites
 
@@ -307,8 +372,10 @@ uv run python -m eval.run        # score the committed corpus -> eval/scorecard.
   `script.md` snapshot. Seeded with Gao and Zhu.
 - The committed `eval/scorecard.md` is the **v1 baseline**: Gao parses cleanly (1.0 on every
   dimension); Zhu fails three of four (0 of 6 chapters detected, markup read aloud, a lost constant).
-  That contrast is the "treadmill" quantified, and the bar the v2 rebuild must beat without
-  regressing. `tests/unit/test_eval_score.py` pins these numbers so a drift fails the normal suite.
+  That contrast is the "treadmill" quantified, and the bar the **v2 engine** (`run-v2`) was built to
+  beat — now validated across Gao, Zhu, and Jain (faithfulness ~0.96-0.995). The verifier that gates
+  v2 narration is the same code the faithfulness scorer reuses.
+  `tests/unit/test_eval_score.py` pins the baseline numbers so a drift fails the normal suite.
 
 To score a new thesis: produce its script (`audiobook run ... --llm anthropic --tts mock`), copy it
 to `eval/corpus/<id>/script.md`, write its `labels.json` + `result.json`, and re-run.
