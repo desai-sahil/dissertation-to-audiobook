@@ -28,3 +28,13 @@ def render_pdf_pages(
         cmd += [str(pdf_path), str(prefix)]
         subprocess.run(cmd, check=True, capture_output=True)
         return [p.read_bytes() for p in sorted(Path(tmp).glob("page*.png"))]
+
+
+def render_pdf_bytes(
+    pdf_bytes: bytes, *, dpi: int = 100
+) -> list[bytes]:  # pragma: no cover - shells out to poppler; exercised via the billed v2 run
+    """Render PDF bytes (e.g. ctx.pdf_bytes) to PNG bytes, in page order, via a temp file."""
+    with tempfile.TemporaryDirectory() as tmp:
+        pdf_path = Path(tmp) / "input.pdf"
+        pdf_path.write_bytes(pdf_bytes)
+        return render_pdf_pages(pdf_path, dpi=dpi)

@@ -20,6 +20,7 @@ from thesis_audiobook.ir import StrictModel
 from thesis_audiobook.verifier import Verdict, Violation, verify_segment
 
 NARRATE_VERSION = "narrate-v1"
+NARRATE_MAX_TOKENS = 1024  # per-segment spoken text is short; bounds output cost
 
 NARRATE_SYSTEM = (
     "You are narrating a PhD thesis as an audiobook. Rewrite the passage as clear SPOKEN prose a "

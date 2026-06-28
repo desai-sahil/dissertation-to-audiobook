@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 
 from thesis_audiobook.config import Config
 from thesis_audiobook.curate import PronunciationPlan
+from thesis_audiobook.engine import EngineOutcome
 from thesis_audiobook.ir import StructureMap
 from thesis_audiobook.lexicon import DEFAULT_LEXICON, Lexicon
 from thesis_audiobook.log import StructuredLogger
@@ -28,11 +29,16 @@ from thesis_audiobook.provenance import ProvenanceMap
 from thesis_audiobook.script_qc import ScriptQcReport
 from thesis_audiobook.script_repair import AppliedRepair, RejectedRepair, ScriptRepairPlan
 from thesis_audiobook.structurer import Reclassification
+from thesis_audiobook.vision_structure import VisionStructureMap
 from thesis_audiobook.warnings import WarningsSink
 
 
 def _new_byte_map() -> dict[str, bytes]:
     return {}
+
+
+def _new_bytes_list() -> list[bytes]:
+    return []
 
 
 def _new_str_map() -> dict[str, str]:
@@ -105,6 +111,11 @@ class Context:
     pdf_bytes: bytes = b""
     cover_image: bytes | None = None
     structure_map: StructureMap | None = None
+    # v2 engine run-scoped state: page images (rendered by the CLI edge), the vision structure map,
+    # and the narration outcome (pairs for faithfulness scoring + flagged-for-review segments).
+    page_images: list[bytes] = field(default_factory=_new_bytes_list)
+    vision_structure: VisionStructureMap | None = None
+    narration: EngineOutcome | None = None
     reclassifications: list[Reclassification] = field(default_factory=_new_reclass)
     citation_genericizations: dict[str, str] = field(default_factory=_new_str_map)
     script_qc_report: ScriptQcReport | None = None

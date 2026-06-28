@@ -48,7 +48,7 @@ from thesis_audiobook.ir import Chunk, Document, DocumentMeta, StructureMap
 from thesis_audiobook.ledger import render_ledger
 from thesis_audiobook.script_qc import ScriptQcReport, render_script_qc_md
 from thesis_audiobook.script_repair import render_script_repair_report
-from thesis_audiobook.stages import build_default_pipeline
+from thesis_audiobook.stages import build_default_pipeline, build_v2_pipeline
 from thesis_audiobook.stages.assemble_audio import slugify
 from thesis_audiobook.structurer import render_structure_changes
 
@@ -134,6 +134,29 @@ def _write_review_artifacts(out: Path, doc: Document) -> tuple[Path, Path]:
         encoding="utf-8",
     )
     return script_path, chunks_path
+
+
+def _write_v2_pairs(out: Path, doc: Document, ctx: Context) -> Path:
+    """Write the v2 (source, spoken) faithfulness pairs + flagged segments + counts, so the eval
+    harness can score faithfulness on the produced narration."""
+    outcome = ctx.narration
+    payload = {
+        "pairs": [p.model_dump() for p in outcome.pairs] if outcome else [],
+        "flagged": [f.model_dump() for f in outcome.flagged] if outcome else [],
+        "counts": (
+            {
+                "narrated": outcome.narrated,
+                "held": outcome.held,
+                "skipped": outcome.skipped,
+                "reviewed": outcome.reviewed,
+            }
+            if outcome
+            else {}
+        ),
+    }
+    path = out / f"{slugify(doc.meta.title)}.v2-pairs.json"
+    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    return path
 
 
 _DEFAULT_COVER = Path("cover/cover01.png")
@@ -547,6 +570,100 @@ def run(
         typer.echo("  Real Anthropic calls (structure + curation) were used (billed); TTS mocked.")
     else:
         typer.echo("  no paid calls were made (LLM/TTS mocked).")
+
+
+@app.command(name="run-v2")
+def run_v2(
+    input_pdf: Annotated[
+        Path, typer.Argument(help="Thesis PDF (read as page images for structure).")
+    ],
+    markdown: Annotated[
+        Path, typer.Option("--markdown", help="Pre-parsed markdown: the narration SOURCE text.")
+    ],
+    llm: Annotated[
+        str, typer.Option("--llm", help="mock (offline, free no-op) or anthropic.")
+    ] = "mock",
+    llm_model: Annotated[
+        str, typer.Option("--llm-model", help="Model for vision + narration.")
+    ] = "claude-sonnet-4-6",
+    dpi: Annotated[
+        int, typer.Option("--dpi", help="Page-render DPI for the vision structure read.")
+    ] = 100,
+    profile: Annotated[
+        str, typer.Option(help="Listener profile: committee or general.")
+    ] = "committee",
+    cache_dir: Annotated[Path, typer.Option(help="Content-addressed cache dir.")] = Path(
+        ".cache/tts"
+    ),
+    seed: Annotated[int, typer.Option(help="Determinism seed.")] = 0,
+    out: Annotated[Path, typer.Option(help="Output directory.")] = Path("out"),
+) -> None:
+    """v2 vision-grounded engine (experimental; the v1 `run` command is unchanged).
+
+    Reads page images for structure (the vision cartographer), then narrates each read section
+    through the verifier-gated generator, and writes the reviewable script plus a faithfulness-pairs
+    sidecar for the eval harness. TTS is mocked here - this produces the script for review/scoring,
+    not audio. COST: --llm mock is a free offline no-op (empty script); --llm anthropic is billed
+    but BOUNDED and CACHED (<= 3 calls per segment, every call cached, so a re-run re-bills none).
+    """
+    if not input_pdf.exists():
+        typer.echo(f"error: input PDF not found: {input_pdf}", err=True)
+        raise typer.Exit(code=2)
+    if not markdown.exists():
+        typer.echo(f"error: markdown not found: {markdown}", err=True)
+        raise typer.Exit(code=2)
+
+    use_real_llm = _validate_llm(llm)
+    config = Config(
+        engine="v2",
+        profile=profile_for(profile),
+        seed=seed,
+        llm_model=llm_model,
+        output_dir=str(out),
+        cache_dir=str(cache_dir),
+        parser_backend="markdown",
+        markdown_path=str(markdown),
+        vision_dpi=dpi,
+    )
+    ctx = build_context(
+        config,
+        pdf_bytes=input_pdf.read_bytes(),
+        log_enabled=False,
+        use_real_llm=use_real_llm,
+        status=build_terminal_reporter(),
+    )
+    if use_real_llm:
+        # I/O at the edge (composition root): render the pages the vision cartographer reads.
+        from thesis_audiobook.adapters.pdf_render import render_pdf_bytes
+
+        typer.echo(f"rendering {input_pdf} at {dpi} dpi ...")
+        ctx.page_images = render_pdf_bytes(ctx.pdf_bytes, dpi=dpi)
+
+    out.mkdir(parents=True, exist_ok=True)
+    seed_doc = Document(meta=DocumentMeta(title="(pending)"))
+    pipeline = build_v2_pipeline()
+    try:
+        ctx.status.start()
+        doc = pipeline.run(seed_doc, ctx, to="assemble_script")  # stop before TTS (no audio here)
+    finally:
+        ctx.status.stop()
+
+    script_path, _ = _write_review_artifacts(out, doc)
+    pairs_path = _write_v2_pairs(out, doc, ctx)
+    counts = ctx.narration
+    typer.echo("Thesis-to-Audiobook  (v2 engine: vision structure + verifier-gated narration)")
+    typer.echo(f"  reviewable script : {script_path}")
+    typer.echo(f"  faithfulness pairs: {pairs_path}")
+    if counts is not None:
+        typer.echo(
+            f"  segments          : {counts.narrated} narrated, {counts.held} held, "
+            f"{counts.skipped} skipped, {counts.reviewed} review"
+        )
+    typer.echo(
+        "  no paid calls were made (LLM mocked)."
+        if not use_real_llm
+        else "  Real Anthropic calls were used (billed); TTS not run."
+    )
 
 
 @app.command()
