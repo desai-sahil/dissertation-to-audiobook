@@ -24,6 +24,7 @@ import re
 
 from thesis_audiobook.ir import StrictModel
 from thesis_audiobook.normalization import FORBIDDEN_RAW_TOKENS
+from thesis_audiobook.verifier import verify_segment
 
 
 class Labels(StrictModel):
@@ -144,6 +145,24 @@ def score_raw_token_leak(script: str) -> DimensionScore:
             counts[ch] = counts.get(ch, 0) + 1
     misses = [f"{ch!r}x{n}" for ch, n in sorted(counts.items())]
     return DimensionScore.of("raw-token leak (clean=1)", 0 if counts else 1, 1, misses)
+
+
+def score_faithfulness(pairs: list[tuple[str, str]]) -> DimensionScore:
+    """Run the verifier over (source, spoken) segment pairs; rate = fraction with no violation.
+
+    This is the dimension v2 introduces and v1 cannot report: v1 has no aligned source/spoken pairs
+    (the deterministic transform never exposed them). The v2 generator emits the pairs, and this
+    quantifies the residual drift the model's rewrite introduces, segment by segment."""
+    clean = 0
+    misses: list[str] = []
+    for source, spoken in pairs:
+        verdict = verify_segment(source, spoken)
+        if verdict.ok:
+            clean += 1
+        elif len(misses) < 8:
+            kinds = ",".join(sorted({v.kind for v in verdict.violations}))
+            misses.append(f"[{kinds}] {spoken[:48]}")
+    return DimensionScore.of("faithfulness (verifier)", clean, len(pairs), misses)
 
 
 def score_thesis(script: str, result: StructureResult, labels: Labels) -> ThesisScore:

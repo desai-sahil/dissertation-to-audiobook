@@ -7,6 +7,7 @@ from eval.score import (
     Labels,
     StructureResult,
     score_citation_strip,
+    score_faithfulness,
     score_raw_token_leak,
     score_structure,
     score_value_preservation,
@@ -71,6 +72,22 @@ def test_raw_token_leak_ignores_ssml_but_catches_foreign_markup() -> None:
     assert score_raw_token_leak('one.<break time="0.8s"/> two.').rate == 1.0
     # a leaked extraction tag (angle brackets that are NOT SSML) still trips the check.
     assert score_raw_token_leak('a <span id="page-9-0"></span> leak').rate == 0.0
+
+
+def test_faithfulness_scores_segment_pairs_via_the_verifier() -> None:
+    clean = [
+        ("increased by 0.5 units", "increased by zero point five units"),
+        ("rose 37% overall", "rose thirty-seven percent overall"),
+    ]
+    assert score_faithfulness(clean).rate == 1.0
+    mixed = [*clean, ("increased by 0.5", "decreased by zero point nine")]  # value + direction
+    score = score_faithfulness(mixed)
+    assert score.passed == 2 and score.total == 3
+    assert any("values" in m or "direction" in m for m in score.misses)
+
+
+def test_faithfulness_empty_is_vacuously_perfect() -> None:
+    assert score_faithfulness([]).rate == 1.0
 
 
 def test_empty_label_set_is_vacuously_perfect() -> None:
