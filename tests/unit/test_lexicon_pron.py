@@ -13,6 +13,8 @@ from thesis_audiobook.stages.tts import TtsStage
 
 
 class _Recorder:
+    cache_tag = "mock"
+
     def __init__(self) -> None:
         self.requests: list[TtsRequest] = []
 

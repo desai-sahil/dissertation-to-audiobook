@@ -73,6 +73,8 @@ class MockVision:
 class MockTts:
     """Returns a deterministic silent WAV sized from len(text). Never networks."""
 
+    cache_tag = "mock"
+
     def synthesize(self, req: TtsRequest) -> bytes:
         return silent_wav(seconds=len(req.text) / 15.0)
 

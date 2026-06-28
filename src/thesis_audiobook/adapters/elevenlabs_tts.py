@@ -65,6 +65,8 @@ def _with_retries[T](  # pragma: no cover - live only
 
 
 class ElevenLabsClient:
+    cache_tag = "elevenlabs"
+
     def __init__(
         self, *, api_key: str | None = None, max_retries: int = 4, base_delay: float = 0.5
     ) -> None:
