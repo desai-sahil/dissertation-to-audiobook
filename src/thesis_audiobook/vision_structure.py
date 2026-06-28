@@ -34,7 +34,39 @@ class VisionChapter(StrictModel):
 
 class VisionStructureMap(StrictModel):
     chapters: list[VisionChapter] = []
-    skip_regions: list[str] = []  # non-body kinds seen: references, appendix, table_of_contents...
+    regions: list[str] = []  # non-body region kinds seen (read/skip decided by the policy below)
+
+
+# --- read-vs-skip policy (deterministic; the model only LABELS a region's kind) ---
+# The author's decision: front matter is largely SPOKEN; only navigation aids and back matter are
+# dropped. Encoding it here (not in the prompt) keeps it auditable and claim-safe - a relabel can
+# never silently change what is read. An unknown kind routes to review, never a silent skip.
+READ_REGION_KINDS = frozenset({"abstract", "acknowledgements", "dedication", "biographical_sketch"})
+SKIP_REGION_KINDS = frozenset(
+    {"table_of_contents", "list_of_figures", "list_of_tables", "references", "appendix"}
+)
+
+
+def region_decision(kind: str) -> str:
+    """'read' | 'skip' | 'review' for a non-body region kind."""
+    normalized = kind.strip().lower()
+    if normalized in READ_REGION_KINDS:
+        return "read"
+    if normalized in SKIP_REGION_KINDS:
+        return "skip"
+    return "review"
+
+
+def read_regions(structure_map: VisionStructureMap) -> list[str]:
+    return [r for r in structure_map.regions if region_decision(r) == "read"]
+
+
+def skipped_regions(structure_map: VisionStructureMap) -> list[str]:
+    return [r for r in structure_map.regions if region_decision(r) == "skip"]
+
+
+def review_regions(structure_map: VisionStructureMap) -> list[str]:
+    return [r for r in structure_map.regions if region_decision(r) == "review"]
 
 
 def build_structure_prompt(first_page: int, last_page: int) -> str:
@@ -48,11 +80,11 @@ def build_structure_prompt(first_page: int, last_page: int) -> str:
         "headers, section or subsection headings, figure or table titles, or reference-list "
         "entries as chapters. Separately, list which non-body REGION KINDS appear on these pages, "
         "choosing from: table_of_contents, list_of_figures, list_of_tables, abstract, "
-        "acknowledgements, references, appendix. Use the absolute page numbers shown. Return ONLY "
-        "this JSON shape: "
+        "acknowledgements, dedication, biographical_sketch, references, appendix. Use the absolute "
+        "page numbers shown. Return ONLY this JSON shape: "
         '{"chapters":[{"number":"II","title":"BACKGROUND","start_page":' + str(first_page) + "}],"
-        '"skip_regions":["references"]}. If no chapter begins on these pages, return an empty '
-        '"chapters" list.'
+        '"regions":["abstract","references"]}. If no chapter begins on these pages, return an '
+        'empty "chapters" list.'
     )
 
 
@@ -95,20 +127,25 @@ def parse_structure_map(raw: str) -> VisionStructureMap:
         start_page = sp if isinstance(sp, int) and not isinstance(sp, bool) else None
         chapters.append(VisionChapter(number=number, title=title, start_page=start_page))
 
-    skip_regions: list[str] = []
-    raw_skips = data.get("skip_regions")
-    skips: list[Any] = cast("list[Any]", raw_skips) if isinstance(raw_skips, list) else []
-    for s in skips:
+    regions: list[str] = []
+    # the prompt asks for "regions"; tolerate a model that still uses the older "skip_regions" key
+    raw_regions = data.get("regions")
+    if not isinstance(raw_regions, list):
+        raw_regions = data.get("skip_regions")
+    region_items: list[Any] = (
+        cast("list[Any]", raw_regions) if isinstance(raw_regions, list) else []
+    )
+    for s in region_items:
         label = str(s).strip().lower()
-        if label and label not in skip_regions:
-            skip_regions.append(label)
+        if label and label not in regions:
+            regions.append(label)
 
-    return VisionStructureMap(chapters=chapters, skip_regions=skip_regions)
+    return VisionStructureMap(chapters=chapters, regions=regions)
 
 
 def merge_maps(maps: list[VisionStructureMap]) -> VisionStructureMap:
     """Combine per-batch maps: dedupe chapters by number (then title), order by start page, and
-    union the skip regions. A chapter heading appears on exactly one page, so concatenation across
+    union the regions. A chapter heading appears on exactly one page, so concatenation across
     page batches plus dedupe is the whole merge."""
     chapters: list[VisionChapter] = []
     seen: set[str] = set()
@@ -120,8 +157,8 @@ def merge_maps(maps: list[VisionStructureMap]) -> VisionStructureMap:
             seen.add(key)
             chapters.append(ch)
     chapters.sort(key=lambda c: (c.start_page is None, c.start_page or 0))
-    skip_regions = sorted({s for m in maps for s in m.skip_regions})
-    return VisionStructureMap(chapters=chapters, skip_regions=skip_regions)
+    regions = sorted({r for m in maps for r in m.regions})
+    return VisionStructureMap(chapters=chapters, regions=regions)
 
 
 def chapters_detected(structure_map: VisionStructureMap) -> int:

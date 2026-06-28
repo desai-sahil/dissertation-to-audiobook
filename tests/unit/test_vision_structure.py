@@ -13,6 +13,10 @@ from thesis_audiobook.vision_structure import (
     chapters_detected,
     merge_maps,
     parse_structure_map,
+    read_regions,
+    region_decision,
+    review_regions,
+    skipped_regions,
 )
 
 _ZHU_CHAPTERS = [
@@ -45,11 +49,17 @@ class _FakeVision:
 
 
 def test_parse_valid_json() -> None:
-    raw = json.dumps({"chapters": _ZHU_CHAPTERS[:2], "skip_regions": ["References"]})
+    raw = json.dumps({"chapters": _ZHU_CHAPTERS[:2], "regions": ["Abstract", "References"]})
     m = parse_structure_map(raw)
     assert [c.number for c in m.chapters] == ["I", "II"]
     assert m.chapters[0].start_page == 9
-    assert m.skip_regions == ["references"]  # lowercased
+    assert m.regions == ["abstract", "references"]  # lowercased
+
+
+def test_parse_tolerates_legacy_skip_regions_key() -> None:
+    # an older reply that still uses "skip_regions" is read into the neutral regions field
+    m = parse_structure_map(json.dumps({"chapters": [], "skip_regions": ["appendix"]}))
+    assert m.regions == ["appendix"]
 
 
 def test_parse_strips_code_fences() -> None:
@@ -79,15 +89,43 @@ def test_parse_skips_malformed_entries_and_bool_pages() -> None:
 
 
 def test_merge_dedupes_by_number_and_orders_by_page() -> None:
-    a = parse_structure_map(
-        json.dumps({"chapters": _ZHU_CHAPTERS[3:], "skip_regions": ["appendix"]})
-    )
+    a = parse_structure_map(json.dumps({"chapters": _ZHU_CHAPTERS[3:], "regions": ["appendix"]}))
     b = parse_structure_map(
-        json.dumps({"chapters": _ZHU_CHAPTERS[:4], "skip_regions": ["references"]})
+        json.dumps({"chapters": _ZHU_CHAPTERS[:4], "regions": ["references"]})
     )  # IV overlaps the batch boundary
     merged = merge_maps([a, b])
     assert [c.number for c in merged.chapters] == ["I", "II", "III", "IV", "V", "VI"]  # ordered
-    assert merged.skip_regions == ["appendix", "references"]  # unioned + sorted
+    assert merged.regions == ["appendix", "references"]  # unioned + sorted
+
+
+def test_region_policy_keeps_front_matter_skips_navigation_and_backmatter() -> None:
+    # the author's call (reaffirmed): abstract + acknowledgements are READ, not skipped.
+    assert region_decision("abstract") == "read"
+    assert region_decision("Acknowledgements") == "read"  # case-insensitive
+    assert region_decision("references") == "skip"
+    assert region_decision("table_of_contents") == "skip"
+    assert region_decision("appendix") == "skip"
+    assert region_decision("epilogue") == "review"  # unknown kind never silently skipped
+
+    # the exact regions vision found for Zhu split the way the user wants
+    zhu = VisionStructureMap(
+        regions=[
+            "abstract",
+            "acknowledgements",
+            "appendix",
+            "list_of_figures",
+            "references",
+            "table_of_contents",
+        ]
+    )
+    assert read_regions(zhu) == ["abstract", "acknowledgements"]
+    assert skipped_regions(zhu) == [
+        "appendix",
+        "list_of_figures",
+        "references",
+        "table_of_contents",
+    ]
+    assert review_regions(zhu) == []
 
 
 def test_collect_structure_batches_and_scores_against_labels() -> None:

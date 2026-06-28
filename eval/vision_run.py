@@ -26,6 +26,9 @@ from thesis_audiobook.vision_structure import (
     chapters_detected,
     merge_maps,
     parse_structure_map,
+    read_regions,
+    review_regions,
+    skipped_regions,
 )
 
 HERE = Path(__file__).parent
@@ -76,7 +79,11 @@ def main() -> None:  # pragma: no cover - billed path (renders + real vision cal
     print(f"\n=== vision structure: {thesis_id} ===")
     for ch in structure.chapters:
         print(f"  {ch.number:>4}  {ch.title}  (p{ch.start_page})")
-    print(f"skip regions: {', '.join(structure.skip_regions) or '(none)'}")
+    print(f"read (front matter): {', '.join(read_regions(structure)) or '(none)'}")
+    print(f"skip:               {', '.join(skipped_regions(structure)) or '(none)'}")
+    review = review_regions(structure)
+    if review:
+        print(f"review (unknown kind): {', '.join(review)}")
     print(
         f"\nstructure score: {score.passed}/{score.total} = {score.rate} "
         f"(v1 baseline was 0/{len(labels.expected_chapters)} = 0.0)"
