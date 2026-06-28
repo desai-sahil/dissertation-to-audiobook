@@ -35,6 +35,34 @@ def _is_table(lines: list[str]) -> bool:
     return len(rows) >= 2 and all(row.strip().startswith("|") for row in rows)
 
 
+def _looks_like_name(text: str) -> str | None:
+    """The text if it reads like a name (2-4 words, capitalized ends, no digits), else None."""
+    words = text.split()
+    if not (2 <= len(words) <= 4) or any(c.isdigit() for c in text):
+        return None
+    if words[0][:1].isupper() and words[-1][:1].isupper():
+        return text
+    return None
+
+
+def _derive_author(blocks: list[Block]) -> str | None:
+    """Pull the author off the title page: the name block right after a standalone 'by', or failing
+    that the '(c) <year> <Name>' copyright line. Conservative - returns None rather than guess."""
+    for i in range(len(blocks) - 1):
+        if blocks[i].text.strip().lower() == "by":
+            name = _looks_like_name(blocks[i + 1].text.strip())
+            if name:
+                return name
+    for block in blocks[:20]:
+        match = re.search(r"(?:©|\(c\)|copyright)\s*\d{4}\s+(.+)", block.text, re.IGNORECASE)
+        if match:
+            candidate = re.split(r"\s+all rights", match.group(1), flags=re.IGNORECASE)[0].strip()
+            name = _looks_like_name(candidate)
+            if name:
+                return name
+    return None
+
+
 def _clean_title(content: str) -> str:
     """A thesis title page is often rendered all caps; sentence-case it so it reads and displays
     cleanly. Mixed-case titles are left exactly as the author wrote them (acronyms preserved)."""
@@ -155,5 +183,9 @@ def markdown_to_document(markdown: str, *, title: str | None = None) -> Document
             block.type = BlockType.backmatter
 
     return Document(
-        meta=DocumentMeta(title=title or derived_title or "Untitled Thesis"), blocks=blocks
+        meta=DocumentMeta(
+            title=title or derived_title or "Untitled Thesis",
+            author=_derive_author(blocks),
+        ),
+        blocks=blocks,
     )

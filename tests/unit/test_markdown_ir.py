@@ -108,6 +108,29 @@ def test_page_anchors_set_block_page_and_spans_are_stripped() -> None:
     assert _by_text(doc, "next page").page == 11
 
 
+def test_author_from_standalone_by_line() -> None:
+    # The title page: a standalone "by" then the name block. The name (not the degree/date that
+    # follows) becomes meta.author, which the intro reads as "..., by <Author>.".
+    md = (
+        "# A TITLE PAGE\n\nA Dissertation Presented to the Faculty\n\n"
+        "by\n\nPiyush Jain\n\nAugust 2023\n\nSome opening prose of the abstract.\n"
+    )
+    assert markdown_to_document(md).meta.author == "Piyush Jain"
+
+
+def test_author_falls_back_to_copyright_line() -> None:
+    # No standalone "by", but a "(c) <year> <Name> ALL RIGHTS RESERVED" line: take the name only.
+    md = "# A TITLE\n\nFront matter.\n\n© 2020 Rui Gao ALL RIGHTS RESERVED\n\nAbstract prose.\n"
+    assert markdown_to_document(md).meta.author == "Rui Gao"
+
+
+def test_author_is_none_when_not_a_name() -> None:
+    # Conservative: a "by" followed by something that is not name-shaped yields no author, rather
+    # than narrating a wrong "by ...". The intro then simply omits the clause.
+    md = "# A TITLE\n\nby\n\nthe Graduate School of Cornell University\n\nAbstract prose here.\n"
+    assert markdown_to_document(md).meta.author is None
+
+
 def test_appendix_and_everything_after_is_backmatter() -> None:
     md = (
         "#### CHAPTER 4\n\n#### CONCLUSION\n\nSome closing prose.\n\n"
