@@ -624,6 +624,14 @@ def run_v2(
         bool,
         typer.Option("--force", help="Render even if the confidence gate flags NEEDS REVIEW."),
     ] = False,
+    preview: Annotated[
+        bool,
+        typer.Option(
+            "--preview",
+            help="Render ONLY the first chapter (plus front matter) to audio - a cheap end-to-end "
+            "test of the whole pipeline. Writes a <slug>.preview.script.md and preview/ audio.",
+        ),
+    ] = False,
     cache_dir: Annotated[Path, typer.Option(help="Content-addressed cache dir.")] = Path(
         ".cache/tts"
     ),
@@ -736,29 +744,45 @@ def run_v2(
         raise typer.Exit(code=3)
 
     # Phase B: lexicon -> TTS -> assembly (mock stand-ins, or the real ElevenLabs + ffmpeg render).
+    # --preview keeps only the first chapter (+ front matter) before TTS, so the full pipeline runs
+    # end-to-end on a cheap slice; its audio goes in a preview/ subdir so it can't clobber a render.
+    slug = slugify(doc.meta.title)
     try:
         ctx.status.start()
-        doc = pipeline.run(doc, ctx, frm="lexicon")
+        if preview:
+            doc = pipeline.run(doc, ctx, frm="lexicon", to="lexicon")
+            doc.chunks = preview_chunks(doc.chunks)
+            preview_script_path = out / f"{slug}.preview.script.md"
+            preview_script_path.write_text("".join(c.text for c in doc.chunks), encoding="utf-8")
+            doc = pipeline.run(doc, ctx, frm="tts")
+        else:
+            doc = pipeline.run(doc, ctx, frm="lexicon")
     except _unavailable as error:
         typer.echo(f"error: {error}", err=True)
         raise typer.Exit(code=2) from error
     finally:
         ctx.status.stop()
 
+    audio_dir = out / "preview" if preview else out
+    audio_dir.mkdir(parents=True, exist_ok=True)
     audio_paths: list[Path] = []
     for blob in ctx.audio_outputs:
-        path = out / blob.filename
+        path = audio_dir / blob.filename
         path.write_bytes(blob.data)
         audio_paths.append(path)
-    provenance_path = out / f"{slugify(doc.meta.title)}.provenance.json"
+    provenance_path = audio_dir / f"{slug}.provenance.json"
     if ctx.provenance is not None:
         provenance_path.write_text(ctx.provenance.model_dump_json(indent=2), encoding="utf-8")
 
     tts_backend = "elevenlabs (real)" if use_real_tts else "mock"
     total_bytes = sum(len(blob.data) for blob in ctx.audio_outputs)
-    estimate = estimate_cost(doc.script or "", config.usd_per_character)
-    typer.echo("Thesis-to-Audiobook  (v2 engine: vision structure + verifier-gated narration)")
+    # Cost reflects what was actually sent to TTS (the preview slice when --preview, else all).
+    estimate = estimate_cost("".join(c.text for c in doc.chunks), config.usd_per_character)
+    scope = "  [PREVIEW: first chapter + front matter only]" if preview else ""
+    typer.echo("Thesis-to-Audiobook  (v2 engine: vision + verifier-gated narration)" + scope)
     typer.echo(f"  reviewable script : {script_path}")
+    if preview:
+        typer.echo(f"  preview script    : {out / f'{slug}.preview.script.md'}")
     typer.echo(f"  faithfulness pairs: {pairs_path}")
     if counts is not None:
         typer.echo(
