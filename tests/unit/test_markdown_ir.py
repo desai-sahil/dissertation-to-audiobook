@@ -22,3 +22,81 @@ def test_markdown_to_document(cassette_dir: Path) -> None:
 
     captions = [b.text for b in doc.blocks if b.type is BlockType.figure_caption]
     assert captions == ["Figure 1. Gas exchange over time."]
+
+
+def test_title_derived_from_first_unnumbered_heading_sentence_cased() -> None:
+    # The title page (an all-caps H1, as Marker renders it) becomes the title, sentence-cased.
+    md = "# STUDY OF IN-PLANT SENSING IN AGRICULTURE\n\n#### A Thesis\n\n## 1 Introduction\n"
+    doc = markdown_to_document(md)
+    assert doc.meta.title == "Study of in-plant sensing in agriculture"
+    # the block itself keeps its original casing (so the cartographer's verbatim check still works)
+    assert doc.blocks[0].text == "STUDY OF IN-PLANT SENSING IN AGRICULTURE"
+
+
+def test_title_derived_from_level_two_heading() -> None:
+    # Some theses (Jain) render the title as an H2, not H1 - any un-numbered heading qualifies.
+    md = "## TRANSDUCING THERMODYNAMIC STATE OF WATER\n\n### A Dissertation\n"
+    assert markdown_to_document(md).meta.title == "Transducing thermodynamic state of water"
+
+
+def test_explicit_title_wins_and_numbered_headings_are_not_titles() -> None:
+    # A caller-supplied title beats the derived one.
+    md = "# 1 Introduction\n\n## 1.1 Background\n"
+    assert markdown_to_document(md, title="Override").meta.title == "Override"
+    # With no title page and only numbered headings, nothing is mistaken for the title.
+    assert markdown_to_document(md).meta.title == "Untitled Thesis"
+
+
+def test_mixed_case_title_is_left_as_written() -> None:
+    md = "# The µTM and WUE in Apple\n"
+    assert markdown_to_document(md).meta.title == "The µTM and WUE in Apple"
+
+
+def _by_text(doc, needle: str):
+    return next(b for b in doc.blocks if needle in b.text)
+
+
+def test_chapter_divider_sets_chapter_and_is_not_emitted() -> None:
+    # "CHAPTER 1" (at whatever level Marker used) sets the running chapter and is itself dropped;
+    # the next title heading carries the single "Chapter one." announcement.
+    md = "#### CHAPTER 1\n\n#### INTRODUCTION\n\n# 1 Context and Motivation\n"
+    doc = markdown_to_document(md)
+    assert all(b.text.upper() != "CHAPTER 1" for b in doc.blocks)  # divider not emitted
+    intro = _by_text(doc, "INTRODUCTION")
+    assert intro.chapter == 1 and intro.section is None  # the chapter title carries the number
+    ctx = _by_text(doc, "Context and Motivation")
+    assert ctx.section == "1" and ctx.chapter == 1  # a bare "# N" is a SECTION, not a chapter
+
+
+def test_per_chapter_section_restart_does_not_clobber_chapter() -> None:
+    # The Gao trap: "# 1".. "# 6" sections restart inside each chapter. A bare numeric heading must
+    # NOT become a chapter, so the next real divider's number reaches its title (not the stale 6).
+    md = (
+        "#### CHAPTER 2\n\n#### MATERIALS AND METHODS\n\n"
+        "# 1 Introduction\n\n# 6 Conclusion\n\n"
+        "#### CHAPTER 3\n\n#### RESULTS AND DISCUSSION\n"
+    )
+    doc = markdown_to_document(md)
+    assert _by_text(doc, "Conclusion").section == "6"  # a section, chapter stays 2
+    assert _by_text(doc, "Introduction").chapter == 2
+    results = _by_text(doc, "RESULTS AND DISCUSSION")
+    assert results.chapter == 3 and results.section is None  # NOT 6
+
+
+def test_emphasis_wrapped_section_number_is_detected() -> None:
+    # Jain wraps headings in **bold**; the leading '*' must not hide the section number.
+    doc = markdown_to_document("### **1.2 Thesis Outline**\n")
+    block = doc.blocks[0]
+    assert block.section == "1.2" and block.text == "Thesis Outline"
+
+
+def test_appendix_and_everything_after_is_backmatter() -> None:
+    md = (
+        "#### CHAPTER 4\n\n#### CONCLUSION\n\nSome closing prose.\n\n"
+        "# 5 APPENDIX\n\nimport numpy as np\n\n#### BIBLIOGRAPHY\n\n[1] A. Author, 2020.\n"
+    )
+    doc = markdown_to_document(md)
+    assert _by_text(doc, "closing prose").type is BlockType.paragraph  # body untouched
+    assert _by_text(doc, "APPENDIX").type is BlockType.backmatter
+    assert _by_text(doc, "import numpy").type is BlockType.backmatter  # appendix code skipped
+    assert _by_text(doc, "A. Author").type is BlockType.backmatter  # trailing bib too

@@ -120,19 +120,6 @@ class Table(StrictModel):
     summary: str | None = None
 
 
-class Citation(StrictModel):
-    marker: str
-    bib_key: str | None = None
-    spoken: str | None = None
-
-
-class BibEntry(StrictModel):
-    key: str
-    authors: list[str] = []
-    year: int | None = None
-    title: str | None = None
-
-
 class Chunk(StrictModel):
     """One unit of text handed to TTS, with neighbor pointers for prosody continuity."""
 
@@ -189,8 +176,6 @@ class Document(StrictModel):
     figures: dict[str, Figure] = {}
     equations: dict[str, Equation] = {}
     tables: dict[str, Table] = {}
-    citations: dict[str, Citation] = {}
-    bibliography: dict[str, BibEntry] = {}
     # Derived artifacts, populated by the assemble_script stage.
     script: str | None = None
     chunks: list[Chunk] = []

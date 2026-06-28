@@ -27,8 +27,10 @@ no model calls); real audio needs the keys below.
 - **Equations** are announced by their real number ("Equation two point three"), not read
   symbol by symbol and not glossed by an LLM. Unnumbered intermediate steps are dropped.
 - **Figure and table captions** are skipped (heavily visual: "Panel A", colors).
-- **Bibliographies / reference lists** are skipped; in-text citations read as author-year
-  ("Buckley and Mott twenty thirteen"), or author-only when no year is available.
+- **Citations are treated as machinery, not narration** (NotebookLM-style): reference markers
+  ("[12]", superscript numbers, "(Geiger et al., 2009)") are stripped, and narrative author
+  mentions are genericized ("Chalmer et al. note that…" → "researchers note that…"). The
+  bibliography is not parsed or read.
 - **Front matter** (abstract, biographical sketch, acknowledgements, dedication) is read;
   the table of contents, list of figures/tables, and appendices are skipped.
 
@@ -82,9 +84,14 @@ marker_single sample/Jain_cornellgrad_0058F_13867.pdf --output_dir out/marker
 
 ### Phase 2 — Extraction QC (audit, then guarded repair)
 
-Opus audits the markdown for extraction defects, then repairs them under a safety guard
-(the LLM proposes; code applies only edits that preserve the token sequence; the LLM
-re-checks). Output is one coherent `*.cleaned.md`.
+The model audits the markdown for extraction defects, then repairs them under safety guards (the
+LLM proposes, code applies only guard-passing edits, the LLM re-checks). Two edit kinds: **noise**
+(typographic/OCR — must preserve the exact word-token sequence and case) and **artifact** —
+de-shredding Marker-mangled notation (a decimal split into per-character `<sup>` tags like
+`<sup>0</sup>.1` → `0.1`, a Miller index `< <sup>111</sup> >` → `1 1 1`), which must restore the
+value using only the digits/symbols already present (ordered digits identical, no sign dropped or
+invented) — so it re-renders faithfully but can never turn `0.15` into `0.5`. Output is one coherent
+`*.cleaned.md` plus a `*.repair-report.md`.
 
 ```bash
 uv run audiobook check-extraction  out/Jain_cornellgrad_0058F_13867.md --llm anthropic
@@ -97,7 +104,7 @@ uv run audiobook repair-extraction out/Jain_cornellgrad_0058F_13867.md --llm ant
 `run` ingests the clean markdown and builds the reviewable script:
 build IR → **structurer** (LLM block-kind classifier) → **cartographer** (LLM structure map:
 chapters vs front/back matter) → select → math (announce equations) → figures (skip captions) →
-citations (author-year) → normalize → assemble. Artifacts are written **before** any TTS spend.
+citations (genericized) → normalize → assemble. Artifacts are written **before** any TTS spend.
 
 The **structurer** is how block detection generalizes across theses without per-thesis regex:
 Opus labels each block's *kind* (prose / heading / equation / code / figure / table / reference
@@ -114,31 +121,51 @@ open out/<slug>.script.md          # the reviewable spoken script
 open out/<slug>.structure.md       # the cartographer's keep/skip decisions
 ```
 
-Before the artifacts are written, a **guarded auto-repair loop** runs (a generator-verifier
-loop). Each round: a *writer* (Opus) proposes small find/replace pronunciation fixes; each
-must clear **two independent safety layers** before it is applied —
+Before the artifacts are written, an **auto-repair loop** runs. Each round a *writer* (LLM)
+proposes small find/replace edits that fix how **notation is spoken** — units and symbols voiced
+in full (`cm` → "centimeters"), leaked LaTeX/markup turned into words, chemical formulas read as
+their name, number/ordinal spacing artifacts. The edits are applied as proposed and the loop
+re-reads the script until a round changes nothing.
 
-1. a **deterministic no-fabrication guard** (the replacement may add no number, year, or
-   name absent from the text it replaces), and
-2. an independent **auditor panel** — two adversarial Opus calls, each grounded only on the
-   original span and the proposed output, both must vote *faithful* (fail-closed). The panel
-   catches what the guard cannot: a flipped claim or relation ("increased" → "decreased")
-   that adds no new number or name.
+By default (**copy-edit mode**) it also fixes the author's clear **mechanical** errors so a
+listener is not tripped up — spelling typos (`stomotal` → "stomatal"), fused words (`withincreasing`
+→ "with increasing"), and meaning-preserving grammar (agreement, a missing article) — plus PDF
+extraction artifacts. What it will **never** do is change the author's **data or claims**: numbers,
+signs, units, and findings are protected, and anything that looks like a value/sign error is
+**flagged for your review, never auto-changed**. Pass `--as-written` to turn copy-edit off and read
+the thesis strictly verbatim (notation vocalization only).
 
-Survivors are applied, the script is re-read, and the loop repeats until a round verifies
-nothing (convergence). So the writer gets broad latitude to *change how text sounds* and
-zero latitude to *invent facts*. Every call is cached (deterministic, cheap to re-run); the
-applied/rejected list lands at `out/<slug>.script-repair.md`. Disable with `--no-script-repair`.
-The auditor is red-teamed against planted fabrications in the `live` test suite.
+The safety floor is a **deterministic guard**, not an LLM auditor: an author-text edit is applied
+only if it preserves every value (digits *and* spelled-out numbers/units, Greek variable names),
+every negation/scope word, and every directional result word ("increased", "higher", "positive"),
+changing at most one content word in place. So a typo fix passes while `increased` → `decreased`,
+`psi` → `phi`, `0.15` → `0.5`, or inserting "significant" is rejected. Edits also apply on **whole
+tokens only**, so `mm` → "millimeters" can never rewrite inside a word ("co**mm**ittee" is safe).
+**Every applied and rejected edit is recorded in `out/<slug>.ledger.md`** (grouped: notation /
+author corrections / extraction artifacts / flagged-for-review) for you to vet before any audio is
+paid for; the IR keeps the verbatim original and every call is cached. Disable the whole stage with
+`--no-script-repair`.
 
-### Phase 4 — Pre-TTS script QC gate
+### Phase 4 — Pre-TTS QC loop (audit → fix → confirm)
 
-Opus audits the (post-repair) script for red flags that would sound wrong (leaked markup,
-truncated sentences, OCR garble, mispronunciations). The report lands at
-`out/<slug>.script-qc.md`. The audit is read-only by design; the guarded repair above
-auto-applies the safe fixes, and the remaining class-level ones become deterministic
-transforms. With `--tts elevenlabs`, **high-severity flags block the render** so you never
-pay to synthesize broken audio (override with `--force`).
+A **bounded** loop, capped at one fix. The phase-3 writer already did one Sonnet fix pass, so this
+is: **Opus sweep → Sonnet fix → Opus confirm**.
+
+1. **Audit / sweep** (`--verifier-model`, Opus by default) — flag red flags the **pipeline**
+   introduced (leaked markup, code/garble read aloud, truncated sentences, a number voiced wrong, a
+   reference number left unread). The sweep is Opus because it catches leaked citation numbers the
+   cheaper model misses. It does **not** flag the author's own spelling, grammar, name
+   pronunciation, or cross-reference numbers, nor the intended genericized/absent citations — those
+   are correct.
+2. **Fix** (`--llm-model`, Sonnet by default) — if flags remain, one pass turns them into safe
+   find/replace edits (whole-token, minimal-edit, logged to the ledger).
+3. **Confirm** (`--verifier-model`, Opus) — re-audit **once**. Its flags are final.
+
+Cost is bounded: a clean script costs one Opus sweep; a defective one adds a Sonnet fix + a single
+Opus confirm — no further iteration, everything cached (audit vs confirm keyed separately so they
+do not collide). Disable the fix+confirm with `--no-qc-loop`, which falls back to a single cheap
+read-only audit on `--llm-model`. The report lands at `out/<slug>.script-qc.md`. With
+`--tts elevenlabs`, **high-severity flags block the render** (override with `--force`).
 
 ### Phase 5 — Render + assemble
 
@@ -157,8 +184,41 @@ uv run audiobook run sample/Jain_cornellgrad_0058F_13867.pdf \
 Outputs land in `out/`: the chaptered audio (`.m4b` or `.mp4`) **plus** a whole-book `.mp3`
 (`--format mp3` emits only that), the `.script.md`, the `.structure.md`, the
 `.script-qc.md`, the `.chunks.json` plan, a `.provenance.json` sidecar (audio timestamp ->
-source block id), and `.qa.md` (the curator's decisions). A cover image shows for the whole
-runtime in the `.mp4` and embeds as album art in the `.m4b`/`.mp3`; omit it for audio-only.
+source block id), `.qa.md` (the curator's decisions), and **`.ledger.md`** (see below). A cover
+image shows for the whole runtime in the `.mp4` and embeds as album art in the `.m4b`/`.mp3`;
+omit it for audio-only.
+
+## Live progress (status spinner)
+
+During a real run, `audiobook run` shows a one-line spinner on stderr under each phase header,
+so you can see which stage or agent loop is working and for how long:
+
+```
+Phase 4: pre-TTS QC loop (audit -> fix -> Opus confirm) ...
+⠹ QC confirm (Opus) (14s)
+```
+
+It cycles through the live step: `Script repair round 1/3`, each stage name, and the QC loop's
+`QC audit (Opus)` -> `QC fix (Sonnet)` -> `QC confirm (Opus)`, with elapsed seconds so a long
+LLM call clearly looks alive rather than hung. The line erases itself before each printed summary
+line, so the deliverable output on stdout is unchanged.
+
+The spinner is purely cosmetic and **only renders in an interactive terminal**. Piped, redirected,
+or CI runs (stderr is not a TTY) are silent, so logs stay clean; `--dry-run` never animates. Run
+the command directly (not through a pipe) to see it. In-process PDF parsing (`--parser
+marker/mineru`) prints its own progress bars to stderr and will interleave with the spinner; the
+recommended separate-parse then `--markdown` flow avoids that.
+
+## The update ledger
+
+`out/<slug>.ledger.md` is one reviewable record of every **judgment** the model-driven stages
+made beyond plain text rendering: the structure inferred (chapters detected, back matter skipped,
+Structurer reclassifications), the curator's pronunciation plan, and the auto-repairs applied or
+rejected by the writer+auditor loop. The pipeline leans on the LLM to absorb per-thesis
+variability rather than a growing pile of per-thesis regexes; the ledger is the accountability for
+that, so you can vet every change before paying for audio. Chapter detection keys on the universal
+`CHAPTER N` divider (so a thesis that numbers its sections `# 1`, `# 2` is not mis-split into
+chapters), and an `APPENDIX` heading sends the rest of the document to skipped back matter.
 
 ## `run` options
 
@@ -166,8 +226,10 @@ runtime in the `.mp4` and embeds as album art in the `.m4b`/`.mp3`; omit it for 
 |---|---|
 | `--markdown <path>` | ingest a pre-parsed Marker/MinerU markdown file (sets `--parser markdown`) |
 | `--parser poppler\|marker\|mineru\|markdown` | PDF parser; poppler is offline, markdown ingests phase-1 output |
-| `--llm mock\|anthropic` | structurer + cartographer + curator + repair/auditor + QC (anthropic costs money) |
-| `--llm-model <id>` | Anthropic model for all LLM stages (default `claude-sonnet-4-6`; `claude-opus-4-8` for max quality) |
+| `--llm mock\|anthropic` | structurer + cartographer + curator + citation genericizer + repair + QC (anthropic costs money) |
+| `--llm-model <id>` | Anthropic model for the pipeline stages (default `claude-sonnet-4-6`; `claude-opus-4-8` for max quality) |
+| `--verifier-model <id>` | model for the phase-4 QC **sweep + confirm** passes (default `claude-opus-4-8`; 1 call if clean, 2 if a fix runs) |
+| `--no-qc-loop` | skip the QC fix+confirm loop (read-only audit only) |
 | `--tts mock\|elevenlabs` | speech synthesis (elevenlabs costs money; needs ffmpeg) |
 | `--format m4b\|mp4\|mp3` | chaptered file (m4b/mp4) + a whole-book mp3; `mp3` emits only the mp3 |
 | `--cover <path>` | cover image (default `cover/cover01.png`); omit to render audio-only |
@@ -178,6 +240,7 @@ runtime in the `.mp4` and embeds as album art in the `.m4b`/`.mp3`; omit it for 
 | `--no-structurer` | skip the LLM block-kind classifier (then deterministic types stand alone) |
 | `--no-curate` | skip the LLM pronunciation curator |
 | `--no-script-repair` | skip the guarded auto-repair (safe pronunciation fixes) |
+| `--as-written` | strict faithful mode: vocalize notation only; do NOT fix the author's typos/grammar or extraction artifacts (copy-edit is on by default) |
 | `--no-script-qc` | skip the phase-4 pre-TTS script QC check |
 | `--force` | render even if phase-4 QC finds high-severity red flags |
 | `--dry-run` | cost estimate + chunk plan, zero external calls |
@@ -192,9 +255,9 @@ you re-run cheaply, the gate clears.
 
 Profiles are validated TOML data files in
 [src/thesis_audiobook/data/profiles/](src/thesis_audiobook/data/profiles/) — edit them to
-retune without touching code. Both profiles announce equations by number; they differ on
-tables and citations: `committee` (default) summarizes tables (LLM) and speaks brief
-citations; `general` skips tables and drops citations.
+retune without touching code. Both profiles announce equations by number and discard citation
+machinery; they differ on tables: `committee` (default) summarizes tables (LLM); `general`
+skips them.
 
 ## The cartographer and curator
 

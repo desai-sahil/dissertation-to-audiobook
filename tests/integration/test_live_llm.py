@@ -23,51 +23,38 @@ def test_live_llm_client_completes() -> None:
 
 
 @pytest.mark.live
-def test_live_auditor_catches_planted_fabrications() -> None:
-    """Red-team the faithfulness auditor against the REAL model: planted fabrications must be
-    rejected by the panel, and a genuine pronunciation fix must pass. Needs ANTHROPIC_API_KEY.
+def test_live_script_repair_vocalizes_notation() -> None:
+    """The real writer proposes notation-vocalization edits, scoped to NOT touch the author's
+    spelling. Needs ANTHROPIC_API_KEY; run with `pytest -m live`.
 
-    This is the trust check for the generator-verifier loop: we only let the writer auto-apply
-    edits because this panel reliably catches invented content. Run with `pytest -m live`.
+    We give a script with a unit abbreviation, a leaked symbol, and a deliberate author typo, and
+    check the model proposes a localized edit for the notation while leaving the typo alone.
     """
     if not os.environ.get("ANTHROPIC_API_KEY"):
         pytest.skip("ANTHROPIC_API_KEY not set")
 
     from thesis_audiobook.adapters.anthropic_llm import AnthropicClient
-    from thesis_audiobook.faithfulness import (
-        AUDIT_FRAMINGS,
-        AUDITOR_MAX_TOKENS,
-        AUDITOR_SYSTEM,
-        build_audit_prompt,
-        panel_faithful,
-        parse_audit_verdict,
+    from thesis_audiobook.script_repair import (
+        SCRIPT_REPAIR_MAX_TOKENS,
+        SCRIPT_REPAIR_SYSTEM,
+        build_script_repair_prompt,
+        candidate_repairs,
+        parse_script_repair_plan,
     )
 
-    client = AnthropicClient()
-
-    def panel(anchor: str, output: str) -> bool:
-        verdicts = [
-            parse_audit_verdict(
-                client.complete(
-                    build_audit_prompt(anchor, output, framing),
-                    system=AUDITOR_SYSTEM,
-                    max_tokens=AUDITOR_MAX_TOKENS,
-                )
-            )
-            for _key, framing in AUDIT_FRAMINGS
-        ]
-        return panel_faithful(verdicts)
-
-    # Each (anchor, output) is a planted fabrication the panel MUST reject.
-    fabrications = [
-        ("R equals eight point three one four", "R equals eight point three one five"),  # number
-        ("psi less than zero", "psi greater than zero"),  # flipped relation
-        ("Buckley and Mott", "Buckley and Mott twenty thirteen"),  # invented year
-        ("conductance and Sack", "Scoffoni and Sack"),  # invented author name
-        ("the effect was not significant", "the effect was significant"),  # dropped negation
-    ]
-    for anchor, output in fabrications:
-        assert not panel(anchor, output), f"auditor MISSED a fabrication: {anchor!r} -> {output!r}"
-
-    # A genuine pronunciation fix (same facts, better spoken form) must pass.
-    assert panel("the CO squared rate", "the carbon dioxide rate")
+    script = (
+        "The sample was held at twenty five cm depth for ten mins. We then measured the "
+        "responce at five mm intervals across the leaf surface."
+    )
+    raw = AnthropicClient().complete(
+        build_script_repair_prompt(script),
+        system=SCRIPT_REPAIR_SYSTEM,
+        max_tokens=SCRIPT_REPAIR_MAX_TOKENS,
+    )
+    plan = parse_script_repair_plan(raw)
+    candidates, _ = candidate_repairs(script, plan.repairs)
+    replaces = " ".join(c.replace for c in candidates).lower()
+    # a unit abbreviation should be vocalized somewhere in the proposed edits
+    assert "centimeters" in replaces or "millimeters" in replaces or "minutes" in replaces
+    # the author's misspelling "responce" must NOT be "corrected" to "response"
+    assert not any("response" in c.replace.lower() for c in candidates)

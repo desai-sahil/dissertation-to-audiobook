@@ -36,7 +36,6 @@ class VoiceSettings(StrictModel):
 class Profile(StrictModel):
     name: str = "committee"
     equation_tier: Literal["announce", "full"] = "announce"
-    citation_policy: Literal["drop", "brief", "full"] = "brief"
     table_handling: Literal["skip", "summarize"] = "summarize"
     include_appendices: bool = False
     voice_id: str = "mock-voice"
@@ -54,7 +53,6 @@ def committee_profile() -> Profile:
     return Profile(
         name="committee",
         equation_tier="announce",
-        citation_policy="brief",
         table_handling="summarize",
         include_appendices=False,
     )
@@ -64,7 +62,6 @@ def general_profile() -> Profile:
     return Profile(
         name="general",
         equation_tier="announce",
-        citation_policy="drop",
         table_handling="skip",
         include_appendices=False,
     )
@@ -96,10 +93,15 @@ def profile_for(name: str) -> Profile:
 class Config(StrictModel):
     profile: Profile = Field(default_factory=committee_profile)
     seed: int = 0
-    # Anthropic model for all LLM stages (cartographer, structurer, curator, repair, auditor,
-    # QC). Sonnet by default - the stages are classification/labelling, not open generation;
+    # Anthropic model for all LLM stages (cartographer, structurer, curator, repair, QC).
+    # Sonnet by default - the stages are classification/labelling, not open generation;
     # override with --llm-model claude-opus-4-8 for the most capable (and pricier) runs.
     llm_model: str = "claude-sonnet-4-6"
+    # The phase-4 QC runs as a bounded loop: audit (llm_model) -> one fix pass -> a single CONFIRM
+    # re-audit on the most capable model (Opus) while the rest stay on the cheaper llm_model.
+    # Disable the fix+confirm loop (keep only the read-only audit) with --no-qc-loop.
+    verifier_model: str = "claude-opus-4-8"
+    qc_loop: bool = True
     # Pinned placeholder rate for the dry-run cost estimate. This is NOT live
     # ElevenLabs pricing; set it from your plan's per-character rate.
     usd_per_character: float = 0.00003
@@ -116,6 +118,11 @@ class Config(StrictModel):
     # Guarded auto-repair of the script (applies only safe pronunciation fixes, before the
     # phase-4 QC gate re-audits). On by default; --no-script-repair disables it.
     script_repair: bool = True
+    # Copy-edit mode: the script-repair writer also fixes the author's clear MECHANICAL errors
+    # (spelling typos, fused words, agreement) and extraction artifacts, under the deterministic
+    # copy-edit guard (numbers/signs/claims are never changed - flagged instead). On by default;
+    # --as-written restores strict faithful mode (notation vocalization only).
+    copyedit: bool = True
     # Phase-4 pre-TTS script QC (red-flag check before ElevenLabs). On by default.
     script_qc: bool = True
     # Audio assembly: a single M4B with chapter markers, or flat per-chapter MP3s.
@@ -129,4 +136,3 @@ class Config(StrictModel):
     # Path to a pre-parsed markdown file, used when parser_backend == "markdown" (run a
     # standalone Marker/MinerU to produce it; see adapters/markdown_parser.py).
     markdown_path: str | None = None
-    grobid_url: str = "http://localhost:8070"

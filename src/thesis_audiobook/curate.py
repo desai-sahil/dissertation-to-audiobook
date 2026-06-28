@@ -16,7 +16,7 @@ import re
 
 from thesis_audiobook.ir import StrictModel
 
-CURATOR_VERSION = "curate-v2"
+CURATOR_VERSION = "curate-v4"
 CURATOR_SYSTEM = (
     "You produce a pronunciation plan for an audiobook. Decide only HOW terms are said, "
     "never WHAT is said. Return ONLY the JSON object requested - no prose, no markdown fences."
@@ -78,11 +78,17 @@ def build_curate_prompt(document_text: str) -> str:
         'appears as "g s", psi_xyl as "psi xyl", VPD_leaf as "VPD leaf" - map those too. For '
         'each, give the full first_use expansion and a short_form spoken as letters: "g s" -> '
         'first_use "stomatal conductance", short_form "g s"; "OXZ" -> first_use "outside xylem '
-        'zone", short_form "O X Z"; "ABA" -> "A B A" - UNLESS a lab says it as a word (ROS -> '
-        '"ross", SPAC -> "spack"). The full term is introduced once, on first use, then only '
-        "the spelled short_form is spoken thereafter (the pipeline handles that automatically; "
-        "you only provide the map).\n"
-        "- terms: gene/protein names a TTS voice would mispronounce.\n"
+        'zone", short_form "O X Z"; "ABA" -> short_form "A B A". ALWAYS spell the short_form as '
+        'separated letters (SPAC -> "S P A C", not "spack"; ROS -> "R O S", not "ross"); never '
+        "invent a word pronunciation for an abbreviation. The full term is introduced once, on "
+        "first use, then only the spelled short_form is spoken thereafter (the pipeline handles "
+        "that automatically; you only provide the map).\n"
+        "- terms: gene/protein names a TTS voice would mispronounce. Do NOT respell ordinary "
+        "proper names or author surnames (Scholander, Penman, Monteith, Cowan), NOR brand, "
+        "instrument, company, or product names (Vaisala, LI-COR, Campbell Scientific, HMP-60) - a "
+        "competent multilingual voice reads them correctly, and a hyphenated respelling often "
+        "makes them WORSE. Only add a term for a genuinely non-phonetic name, and if you are "
+        "unsure, leave it out and add a note instead of guessing a respelling.\n"
         '- notation: flattened math/symbols (e.g. "psi apo ssc") mapped to plain words.\n'
         '- dehyphenations: words a PDF line break split with a stray hyphen ("me-asurable" '
         '-> "measurable", "encom-pass" -> "encompass"). Only real broken words; keep genuine '

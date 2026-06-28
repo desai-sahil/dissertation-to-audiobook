@@ -2,91 +2,118 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from thesis_audiobook.bootstrap import build_mock_context
 from thesis_audiobook.config import Config
 from thesis_audiobook.ir import Chunk, Document, DocumentMeta
 from thesis_audiobook.script_repair import (
     ScriptRepair,
-    apply_script_repairs,
-    is_safe_script_repair,
+    apply_one,
+    candidate_repairs,
     parse_script_repair_plan,
 )
 from thesis_audiobook.stages.script_repair import ScriptRepairStage
 
+
+def test_candidate_repairs_copyedit_dispatch_by_kind() -> None:
+    script = "the responce curve rose to 0.5 here and is not flat overall."
+    repairs = [
+        ScriptRepair(find="responce", replace="response", reason="typo", kind="spelling"),
+        ScriptRepair(find="0.5 here", replace="0.9 here", reason="num", kind="grammar"),  # guard
+        ScriptRepair(find="is not flat", replace="is flat", reason="x", kind="grammar"),  # guard
+        ScriptRepair(find="rose to 0.5", replace="rose to 0.5 now", reason="d", kind="data"),
+    ]
+    cands, rej = candidate_repairs(script, repairs, copyedit=True)
+    kept = {c.find for c in cands}
+    assert "responce" in kept  # spelling typo passes the copy-edit guard
+    assert "0.5 here" not in kept  # number change blocked
+    assert "is not flat" not in kept  # negation drop blocked
+    assert any(r.find == "rose to 0.5" and "flag only" in r.why for r in rej)  # data never applied
+
+
+def test_candidate_repairs_as_written_blocks_author_but_keeps_notation() -> None:
+    cands, rej = candidate_repairs(
+        "the responce curve",
+        [ScriptRepair(find="responce", replace="response", kind="spelling")],
+        copyedit=False,
+    )
+    assert not cands and any("--as-written" in r.why for r in rej)
+    cands, _ = candidate_repairs(
+        "say cm now",
+        [ScriptRepair(find="cm", replace="centimeters", kind="notation")],
+        copyedit=False,
+    )
+    assert cands and cands[0].replace == "centimeters"  # notation still applies as-written
+
+
 _PLAN = (
-    '{"summary":"minor fixes","repairs":['
-    '{"find":"CO squared","replace":"carbon dioxide","reason":"CO2 mis-read"},'
-    '{"find":"Buckley and Mott","replace":"Buckley and Mott twenty thirteen","reason":"year"}],'
-    '"issues":[{"kind":"citation_error","severity":"low","location":"x","detail":"y",'
-    '"suggestion":"z"}]}'
+    '{"summary":"notation fixes","repairs":['
+    '{"find":"ten cm deep","replace":"ten centimeters deep","reason":"unit"},'
+    '{"find":"absent phrase","replace":"whatever","reason":"not in script"}],'
+    '"issues":[{"kind":"other","severity":"low","location":"x","detail":"y","suggestion":"z"}]}'
 )
 
 
 class _ScriptedLlm:
-    """Prompt-aware fake: returns the writer plan for the writer prompt and a fixed auditor verdict
-    for the auditor prompt (the stage now makes both kinds of call)."""
+    """Prompt-aware fake: returns the writer plan for the writer prompt (the stage makes only the
+    one writer call per round now - no auditor)."""
 
-    def __init__(self, plan_json: str, verdict_json: str = '{"faithful": true}') -> None:
+    def __init__(self, plan_json: str) -> None:
         self.plan_json = plan_json
-        self.verdict_json = verdict_json
         self.writer_calls = 0
-        self.audit_calls = 0
 
     def complete(self, prompt: str, *, system: str | None = None, max_tokens: int | None = None):
-        if "ORIGINAL:" in prompt and "SPOKEN:" in prompt:  # the auditor prompt
-            self.audit_calls += 1
-            return self.verdict_json
         self.writer_calls += 1
         return self.plan_json
 
 
-@pytest.mark.parametrize(
-    "find,replace,safe",
-    [
-        ("CO squared", "carbon dioxide", True),  # pronunciation swap, no new facts
-        ("mm", "millimeters", True),
-        ("H two degrees", "water", True),
-        # a leaked fragment ending "(two point nine)" -> announce; "Equation" is structural, and
-        # the number is sourced from find, so this is safe
-        ("equals mu and so on (two point nine)", "Equation two point nine", True),
-        ("see the diagram", "see Figure three", False),  # but a NEW number is still fabrication
-        ("Buckley and Mott", "Buckley and Mott twenty thirteen", False),  # fabricated year
-        ("the first chapter", "the second chapter", False),  # fabricated ordinal
-        ("conductance & Sack", "Scoffoni and Sack", False),  # fabricated name
-        ("eight hundred four", "eight zero four", False),  # fabricated number-word
-        ("same", "same", False),  # no-op
-        ("x" * 200, "y", False),  # too large a span
-    ],
-)
-def test_guard_blocks_fabrication(find: str, replace: str, safe: bool) -> None:
-    assert is_safe_script_repair(find, replace) is safe
+def test_tidy_punctuation_collapses_doubled_commas() -> None:
+    from thesis_audiobook.stages.script_repair import tidy_punctuation
+
+    # the ",," a too-aggressive edit can leave (parens rewritten as commas next to an existing one)
+    assert tidy_punctuation("temperature,, solar") == "temperature, solar"
+    assert tidy_punctuation("room temperature, H M P sixty, Vaisala,, solar") == (
+        "room temperature, H M P sixty, Vaisala, solar"
+    )
+    assert tidy_punctuation("clean, normal text") == "clean, normal text"  # no-op on clean text
+
+
+def test_apply_one_only_matches_whole_tokens() -> None:
+    # the regression that prompted this design: a bare unit edit must NOT rewrite inside a word.
+    chunks = [Chunk(id="c1", text="the committee saw five mm of growth", block_ids=["b1"])]
+    count = apply_one(chunks, ScriptRepair(find="mm", replace="millimeters"))
+    assert count == 1
+    assert chunks[0].text == "the committee saw five millimeters of growth"  # committee untouched
+
+
+def test_apply_one_preserves_block_ids_all_occurrences() -> None:
+    chunks = [
+        Chunk(id="c1", text="held at ten cm then twenty cm", block_ids=["b1"], chapter=1),
+        Chunk(id="c2", text="and thirty cm later", block_ids=["b2"], chapter=1),
+    ]
+    count = apply_one(chunks, ScriptRepair(find="cm", replace="centimeters"))
+    assert count == 3
+    assert chunks[0].text == "held at ten centimeters then twenty centimeters"
+    assert chunks[0].block_ids == ["b1"] and chunks[1].block_ids == ["b2"]
+
+
+def test_candidate_repairs_keeps_locatable_drops_unfindable() -> None:
+    script = "the sample at ten cm deep"
+    repairs = [
+        ScriptRepair(find="ten cm deep", replace="ten centimeters deep"),
+        ScriptRepair(find="absent phrase", replace="x"),
+        ScriptRepair(find="same", replace="same"),  # no-op
+    ]
+    candidates, rejected = candidate_repairs(script, repairs)
+    assert [c.find for c in candidates] == ["ten cm deep"]
+    whys = {r.find: r.why for r in rejected}
+    assert whys["absent phrase"] == "not found in script"
+    assert "no-op" in whys["same"]
 
 
 def test_parse_handles_garbage() -> None:
     assert parse_script_repair_plan("not json").is_empty()
     plan = parse_script_repair_plan(f"```json\n{_PLAN}\n```")
     assert len(plan.repairs) == 2 and len(plan.issues) == 1
-
-
-def test_apply_preserves_block_ids_and_skips_unsafe() -> None:
-    chunks = [
-        Chunk(id="c1", text="the CO squared rate rose ", block_ids=["b1"], chapter=1),
-        Chunk(id="c2", text="per Buckley and Mott here", block_ids=["b2"], chapter=1),
-    ]
-    plan = parse_script_repair_plan(_PLAN)
-    applied, rejected = apply_script_repairs(chunks, plan.repairs)
-    assert [a.find for a in applied] == ["CO squared"]  # safe one applied
-    assert chunks[0].text == "the carbon dioxide rate rose " and chunks[0].block_ids == ["b1"]
-    assert any(r.find == "Buckley and Mott" for r in rejected)  # fabrication blocked
-    assert chunks[1].text == "per Buckley and Mott here"  # untouched
-
-
-def test_apply_reports_not_found() -> None:
-    chunks = [Chunk(id="c1", text="clean text", block_ids=["b1"])]
-    _, rejected = apply_script_repairs(chunks, [ScriptRepair(find="absent", replace="present")])
-    assert rejected and rejected[0].why == "not found in script"
 
 
 def test_stage_mock_is_noop(tiny_ir_path: Path) -> None:
@@ -102,7 +129,7 @@ def test_stage_mock_is_noop(tiny_ir_path: Path) -> None:
 
 
 def _doc() -> Document:
-    text = "the CO squared rate per Buckley and Mott"
+    text = "the sample at ten cm deep, recorded by the committee"
     return Document(
         meta=DocumentMeta(title="t"),
         script=text,
@@ -110,37 +137,19 @@ def _doc() -> Document:
     )
 
 
-def test_stage_applies_safe_when_auditor_passes_and_caches(tiny_ir_path: Path) -> None:
+def test_stage_applies_notation_edit_and_caches(tiny_ir_path: Path) -> None:
     ctx = build_mock_context(Config(), pdf_bytes=b"x", mock_ir=tiny_ir_path)
-    fake = _ScriptedLlm(_PLAN, verdict_json='{"faithful": true}')
+    fake = _ScriptedLlm(_PLAN)
     ctx.llm = fake
 
     doc = ScriptRepairStage().run(_doc(), ctx)
-    # the safe edit passes guard + auditor and applies; the fabrication is guard-rejected
-    assert "carbon dioxide" in (doc.script or "") and "CO squared" not in (doc.script or "")
-    assert "Buckley and Mott" in (doc.script or "")
+    assert "ten centimeters deep" in (doc.script or "")
+    assert "committee" in (doc.script or "")  # whole-token apply left the word intact
     assert len(ctx.script_repair_applied) == 1
-    assert any("Buckley" in r.find for r in ctx.script_repair_rejected)
-    calls_after_first = (fake.writer_calls, fake.audit_calls)
-    ScriptRepairStage().run(_doc(), ctx)  # identical input -> every call cache-hits
-    assert (fake.writer_calls, fake.audit_calls) == calls_after_first
-
-
-def test_stage_auditor_vetoes_a_guard_passing_edit(tiny_ir_path: Path) -> None:
-    # A claim flip ("increased" -> "decreased") adds no number/name, so the deterministic guard
-    # passes it - but it changes meaning, so the auditor panel must veto it (fail-closed).
-    plan = '{"repairs":[{"find":"the value increased","replace":"the value decreased"}]}'
-    ctx = build_mock_context(Config(), pdf_bytes=b"x", mock_ir=tiny_ir_path)
-    ctx.llm = _ScriptedLlm(plan, verdict_json='{"faithful": false, "reason": "claim flipped"}')
-    doc = Document(
-        meta=DocumentMeta(title="t"),
-        script="we found the value increased here",
-        chunks=[Chunk(id="c1", text="we found the value increased here", block_ids=["b"])],
-    )
-    ScriptRepairStage().run(doc, ctx)
-    assert doc.script == "we found the value increased here"  # NOT applied
-    assert ctx.script_repair_applied == []
-    assert any(r.why.startswith("auditor:") for r in ctx.script_repair_rejected)
+    assert any(r.find == "absent phrase" for r in ctx.script_repair_rejected)
+    calls_after_first = fake.writer_calls
+    ScriptRepairStage().run(_doc(), ctx)  # identical input -> writer call cache-hits
+    assert fake.writer_calls == calls_after_first
 
 
 def test_stage_disabled_skips(tiny_ir_path: Path) -> None:
@@ -149,5 +158,5 @@ def test_stage_disabled_skips(tiny_ir_path: Path) -> None:
     ctx.llm = fake
     doc = _doc()
     ScriptRepairStage().run(doc, ctx)
-    assert fake.writer_calls == 0 and fake.audit_calls == 0
-    assert doc.script == "the CO squared rate per Buckley and Mott"
+    assert fake.writer_calls == 0
+    assert doc.script == "the sample at ten cm deep, recorded by the committee"

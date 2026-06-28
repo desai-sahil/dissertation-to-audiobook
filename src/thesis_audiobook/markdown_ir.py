@@ -14,8 +14,13 @@ from thesis_audiobook.ir import Block, BlockType, Document, DocumentMeta
 from thesis_audiobook.normalization.latex import split_display_math
 
 _HEADING = re.compile(r"^(#{1,6})\s+(.*\S)\s*$")
-_SECTION = re.compile(r"^(\d+(?:\.\d+)+)\s+(.*)$")
-_CHAPTER = re.compile(r"^(?:chapter\s+)?(\d+)\.?\s+(.*)$", re.IGNORECASE)
+_SECTION = re.compile(r"^(\d+(?:\.\d+)+)\s+(.*)$")  # a dotted section number: "2.3.1 Title"
+_SINGLE_SECTION = re.compile(r"^(\d+)\s+(\S.*)$")  # a bare integer section: "2 Background"
+# A TRUE chapter divider, the one cross-thesis anchor: the heading text is exactly "CHAPTER N"
+# (Marker emits it at whatever level - Gao #### , Jain ### ). A bare numbered heading like
+# "# 2 Background" is a SECTION, never a chapter; only this explicit divider sets the chapter.
+_DIVIDER = re.compile(r"(?i)^chapter\s+(\d+)$")
+_APPENDIX = re.compile(r"(?i)^appendix\b")  # an appendix heading (after any number/letter strip)
 _IMAGE = re.compile(r"^!\[(?P<alt>[^\]]*)\]\([^)]*\)\s*$")
 
 
@@ -24,9 +29,20 @@ def _is_table(lines: list[str]) -> bool:
     return len(rows) >= 2 and all(row.strip().startswith("|") for row in rows)
 
 
+def _clean_title(content: str) -> str:
+    """A thesis title page is often rendered all caps; sentence-case it so it reads and displays
+    cleanly. Mixed-case titles are left exactly as the author wrote them (acronyms preserved)."""
+    title = " ".join(content.split())
+    letters = [c for c in title if c.isalpha()]
+    if letters and all(c.isupper() for c in letters):
+        return title[:1].upper() + title[1:].lower()
+    return title
+
+
 def markdown_to_document(markdown: str, *, title: str | None = None) -> Document:
     blocks: list[Block] = []
     chapter: int | None = None
+    derived_title: str | None = None
     seq = 0
 
     for chunk in re.split(r"\n\s*\n", markdown):
@@ -54,16 +70,29 @@ def markdown_to_document(markdown: str, *, title: str | None = None) -> Document
 
         heading = _HEADING.match(lines[0]) if len(lines) == 1 else None
         if heading is not None:
-            level, content = len(heading.group(1)), heading.group(2).strip()
+            # Strip markdown emphasis before classifying: Marker wraps many headings in **bold**
+            # (e.g. Jain's "### **1.2 Thesis Outline**"), and a leading '*' would otherwise hide the
+            # section number. Removing it lets _SECTION/_DIVIDER see the number and reads cleaner.
+            content = " ".join(heading.group(2).replace("*", "").split())
+            # A chapter divider sets the running chapter and is not itself spoken; the next title
+            # heading carries the single "Chapter N. Title." announcement. Without this, Gao's
+            # per-chapter "# 1.. # 6" section restarts used to clobber the chapter number.
+            divider = _DIVIDER.match(content)
+            if divider is not None:
+                chapter = int(divider.group(1))
+                continue
             section: str | None = None
-            section_match = _SECTION.match(content)
+            numbered = False
+            section_match = _SECTION.match(content) or _SINGLE_SECTION.match(content)
             if section_match is not None:
                 section, content = section_match.group(1), section_match.group(2).strip()
-            elif level == 1:
-                chapter_match = _CHAPTER.match(content)
-                if chapter_match is not None:
-                    chapter = int(chapter_match.group(1))
-                    content = chapter_match.group(2).strip() or content
+                numbered = True
+            # The first un-numbered heading (any level) is the title-page title; capture it so the
+            # title never silently falls back to "Untitled Thesis" when the cartographer cannot
+            # propose one (e.g. its cache was invalidated by a Structurer reclassification). The
+            # block keeps its original text; only the derived title is cleaned.
+            if derived_title is None and not numbered:
+                derived_title = _clean_title(content)
             blocks.append(
                 Block(
                     id=block_id,
@@ -91,4 +120,23 @@ def markdown_to_document(markdown: str, *, title: str | None = None) -> Document
         flattened = text if block_type is BlockType.table else " ".join(lines)
         blocks.append(Block(id=block_id, type=block_type, chapter=chapter, text=flattened))
 
-    return Document(meta=DocumentMeta(title=title or "Untitled Thesis"), blocks=blocks)
+    # Appendices (and everything after them, e.g. a trailing bibliography or source-code listing)
+    # are back matter: read only when the profile opts in (select gates BlockType.backmatter on
+    # include_appendices), and their code never reaches TTS otherwise. Detected by the first
+    # APPENDIX heading; the remainder of the document follows it. Deterministic and claim-safe -
+    # only block.type changes, no text is edited.
+    appendix_at = next(
+        (
+            i
+            for i, b in enumerate(blocks)
+            if b.type is BlockType.heading and _APPENDIX.match(b.text)
+        ),
+        None,
+    )
+    if appendix_at is not None:
+        for block in blocks[appendix_at:]:
+            block.type = BlockType.backmatter
+
+    return Document(
+        meta=DocumentMeta(title=title or derived_title or "Untitled Thesis"), blocks=blocks
+    )

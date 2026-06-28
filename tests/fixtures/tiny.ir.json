@@ -88,26 +88,22 @@
     "fig1": {
       "id": "fig1",
       "caption": "Fig. 1. (A) gs over time. (B) CO2 response.",
-      "ref_points": ["ch1.p1"],
+      "ref_points": [
+        "ch1.p1"
+      ],
       "page": 2
     }
   },
   "equations": {
-    "eq1": { "id": "eq1", "latex": "g_s = f(x)" }
+    "eq1": {
+      "id": "eq1",
+      "latex": "g_s = f(x)"
+    }
   },
   "tables": {
-    "tab1": { "id": "tab1", "raw": "raw table grid omitted" }
-  },
-  "citations": {
-    "1": { "marker": "1", "bib_key": "smith2019" },
-    "2": { "marker": "2", "bib_key": "jones2020" },
-    "3": { "marker": "3", "bib_key": "lee2021" },
-    "15": { "marker": "15", "bib_key": "bacheva2023" }
-  },
-  "bibliography": {
-    "smith2019": { "key": "smith2019", "authors": ["Smith", "Roe"], "year": 2019, "title": "Hydraulics of stomata" },
-    "jones2020": { "key": "jones2020", "authors": ["Jones"], "year": 2020, "title": "ABA signaling" },
-    "lee2021": { "key": "lee2021", "authors": ["Lee", "Park", "Kim"], "year": 2021, "title": "Guard cell dynamics" },
-    "bacheva2023": { "key": "bacheva2023", "authors": ["Bacheva", "Mencuccini"], "year": 2023, "title": "Poroelastic signaling" }
+    "tab1": {
+      "id": "tab1",
+      "raw": "raw table grid omitted"
+    }
   }
 }

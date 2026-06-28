@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 from pathlib import Path
 from typing import Annotated
@@ -17,7 +18,7 @@ import typer
 from thesis_audiobook.adapters.anthropic_llm import AnthropicUnavailableError
 from thesis_audiobook.adapters.elevenlabs_tts import ElevenLabsUnavailableError
 from thesis_audiobook.adapters.ffmpeg_muxer import FfmpegUnavailableError
-from thesis_audiobook.bootstrap import build_context
+from thesis_audiobook.bootstrap import build_context, build_terminal_reporter
 from thesis_audiobook.cartographer import render_structure_md
 from thesis_audiobook.chunking import preview_chunks
 from thesis_audiobook.config import Config, OutputMode, ParserBackend, profile_for
@@ -44,7 +45,7 @@ from thesis_audiobook.extraction_repair import (
     render_repair_report,
 )
 from thesis_audiobook.ir import Chunk, Document, DocumentMeta, StructureMap
-from thesis_audiobook.linkage import citation_linkage
+from thesis_audiobook.ledger import render_ledger
 from thesis_audiobook.script_qc import ScriptQcReport, render_script_qc_md
 from thesis_audiobook.script_repair import render_script_repair_report
 from thesis_audiobook.stages import build_default_pipeline
@@ -224,6 +225,22 @@ def run(
             "use claude-opus-4-8 for the most capable, pricier runs).",
         ),
     ] = "claude-sonnet-4-6",
+    verifier_model: Annotated[
+        str,
+        typer.Option(
+            "--verifier-model",
+            help="Model for the phase-4 QC CONFIRM pass (default claude-opus-4-8; one call per "
+            "run, the judgment-heavy step, so it stays on the most capable model).",
+        ),
+    ] = "claude-opus-4-8",
+    no_qc_loop: Annotated[
+        bool,
+        typer.Option(
+            "--no-qc-loop",
+            help="Skip the QC fix+confirm loop (just the read-only audit, no auto-fix, no Opus "
+            "confirm).",
+        ),
+    ] = False,
     tts: Annotated[str, typer.Option("--tts", help=_TTS_HELP)] = "mock",
     audio_format: Annotated[str, typer.Option("--format", help=_FORMAT_HELP)] = "m4b",
     cover: Annotated[Path | None, typer.Option("--cover", help=_COVER_HELP)] = None,
@@ -254,6 +271,14 @@ def run(
             "--no-script-repair", help="Skip the guarded auto-repair of the script (safe fixes)."
         ),
     ] = False,
+    as_written: Annotated[
+        bool,
+        typer.Option(
+            "--as-written",
+            help="Strict faithful mode: vocalize notation only; do NOT fix the author's "
+            "spelling/grammar or extraction artifacts (copy-edit is on by default).",
+        ),
+    ] = False,
     no_script_qc: Annotated[
         bool, typer.Option("--no-script-qc", help="Skip the phase-4 pre-TTS script QC check.")
     ] = False,
@@ -271,7 +296,7 @@ def run(
 ) -> None:
     """Run the pipeline: parse -> script -> render -> assemble.
 
-    Parsing is real (poppler offline, or marker/mineru + GROBID). The LLM (structure map +
+    Parsing is real (poppler offline, or marker/mineru/markdown). The LLM (structure map +
     curation) and TTS are mocked by default; --llm anthropic and --tts elevenlabs switch on
     the real, billed services (the real render also needs ffmpeg). --dry-run estimates cost
     with no external calls; --preview renders only the first chapter.
@@ -286,15 +311,18 @@ def run(
         profile=profile_for(profile),
         seed=seed,
         llm_model=llm_model,
+        verifier_model=verifier_model,
         output_dir=str(out),
         cache_dir=str(cache_dir),
         parser_backend=_validate_parser(parser),
         output_mode=_validate_format(audio_format),
         curate=not no_curate,
+        copyedit=not as_written,
         structurer=not no_structurer,
         structure_eval=not no_structure_eval,
         script_repair=not no_script_repair,
         script_qc=not no_script_qc,
+        qc_loop=not no_qc_loop,
     )
     if markdown is not None:
         if not markdown.exists():
@@ -317,6 +345,9 @@ def run(
         # (the cartographer and curator stages run before assemble_script).
         use_real_llm=use_real_llm and not dry_run,
         use_real_tts=use_real_tts and not dry_run,
+        # Live one-line spinner for the real run; inert (never start()ed) on --dry-run, and a
+        # silent no-op whenever stderr is not a TTY (pipes, CI, redirected logs).
+        status=build_terminal_reporter(),
     )
     pipeline = build_default_pipeline()
     seed_doc = Document(meta=DocumentMeta(title="(pending)"))
@@ -364,17 +395,27 @@ def run(
     cover_bytes, cover_note = _resolve_cover(cover)
     ctx.cover_image = cover_bytes
 
+    if use_real_llm:
+        # Keep the anthropic/httpx SDK retry+info chatter off stderr so it does not smear the live
+        # status spinner (they share stderr). Real errors still surface: the SDK raises, which we
+        # convert to AnthropicUnavailableError below.
+        for _name in ("anthropic", "httpx", "httpcore"):
+            logging.getLogger(_name).setLevel(logging.ERROR)
+
     _unavailable = (AnthropicUnavailableError, ElevenLabsUnavailableError, FfmpegUnavailableError)
 
     # Phase 3: prepare the narration script (build IR -> structure -> select -> math ->
     # citations -> normalize -> assemble_script -> guarded script repair). Artifacts are written
     # (post-repair) before any TTS spend.
     typer.echo("Phase 3: preparing the narration script ...")
+    ctx.status.start()
     try:
         doc = pipeline.run(seed_doc, ctx, to="script_repair")
     except _unavailable as error:
         typer.echo(f"error: {error}", err=True)
         raise typer.Exit(code=2) from error
+    finally:
+        ctx.status.stop()
 
     slug = slugify(doc.meta.title)
     script_path, chunks_path = _write_review_artifacts(out, doc)
@@ -402,13 +443,33 @@ def run(
             f"{len(ctx.script_repair_rejected)} sent to review - see {repair_path}"
         )
 
-    # Phase 4: pre-TTS QC. Audit the finished script for red flags BEFORE any ElevenLabs spend.
-    typer.echo("Phase 4: pre-TTS quality check ...")
+    # The update ledger: one reviewable record of every judgment (structure, pronunciation,
+    # auto-repairs) the model-driven stages made, so a human can vet them before any spend.
+    ledger_path = out / f"{slug}.ledger.md"
+    ledger_path.write_text(
+        render_ledger(
+            doc,
+            ctx.reclassifications,
+            ctx.pronunciation_plan,
+            ctx.script_repair_applied,
+            ctx.script_repair_rejected,
+            ctx.citation_genericizations,
+        ),
+        encoding="utf-8",
+    )
+    typer.echo(f"  update ledger written - see {ledger_path}")
+
+    # Phase 4: the bounded QC loop - audit (Sonnet), one fix pass, then a single Opus confirm -
+    # BEFORE any ElevenLabs spend. The final report feeds the gate.
+    typer.echo("Phase 4: pre-TTS QC loop (audit -> fix -> Opus confirm) ...")
+    ctx.status.start()
     try:
         doc = pipeline.run(doc, ctx, frm="script_qc", to="script_qc")
     except _unavailable as error:
         typer.echo(f"error: {error}", err=True)
         raise typer.Exit(code=2) from error
+    finally:
+        ctx.status.stop()
     qc_report = ctx.script_qc_report or ScriptQcReport()
     script_qc_path = out / f"{slug}.script-qc.md"
     script_qc_path.write_text(render_script_qc_md(qc_report), encoding="utf-8")
@@ -429,6 +490,7 @@ def run(
 
     # Phase 5: render + assembly (ElevenLabs TTS + ffmpeg mux, or mock stand-ins).
     typer.echo(f"Phase 5: {'ElevenLabs render' if use_real_tts else 'mock render'} + assembly ...")
+    ctx.status.start()
     try:
         if preview:
             doc = pipeline.run(doc, ctx, frm="lexicon", to="lexicon")
@@ -439,6 +501,8 @@ def run(
     except _unavailable as error:
         typer.echo(f"error: {error}", err=True)
         raise typer.Exit(code=2) from error
+    finally:
+        ctx.status.stop()
 
     audio_paths: list[Path] = []
     for blob in ctx.audio_outputs:
@@ -507,20 +571,14 @@ def parse(
     out_ir.parent.mkdir(parents=True, exist_ok=True)
     out_ir.write_text(doc.model_dump_json(indent=2), encoding="utf-8")
 
-    rate, resolved, unresolved = citation_linkage(doc)
     counts: dict[str, int] = {}
     for block in doc.blocks:
         counts[block.type.value] = counts.get(block.type.value, 0) + 1
 
-    typer.echo(f"parsed {input_pdf} with {parser}")
+    typer.echo(f"parsed {input_pdf}")
     typer.echo(f"  IR written       : {out_ir}")
     typer.echo(f"  title            : {doc.meta.title}")
     typer.echo(f"  blocks           : {len(doc.blocks)}  {counts}")
-    typer.echo(f"  bibliography      : {len(doc.bibliography)} entries")
-    typer.echo(
-        f"  citation linkage : {rate:.0%} ({len(resolved)}/{len(resolved) + len(unresolved)} "
-        f"markers); unresolved: {unresolved or 'none'}"
-    )
     typer.echo("  Gate A warnings:")
     typer.echo(ctx.warnings.report())
 

@@ -101,6 +101,42 @@ def section_to_words(section: str) -> str:
     return " point ".join(words) if words else section.strip()
 
 
+_DECADE_PLURAL = {
+    "twenty": "twenties", "thirty": "thirties", "forty": "forties", "fifty": "fifties",
+    "sixty": "sixties", "seventy": "seventies", "eighty": "eighties", "ninety": "nineties",
+}  # fmt: skip
+_DECADE = re.compile(r"(?<![A-Za-z0-9])(\d{2,4})0s\b")
+# Cross-references: an anchor word followed by a dotted number, read like a heading number
+# ("Section 2.3.1" -> "Section two point three point one") instead of the generic decimal path,
+# which only consumes the FIRST dot group and leaves a stray ".one". Single-integer refs already
+# read fine, so only dotted refs are routed here. Anchored so ordinary decimals (0.4 MPa) are safe.
+_XREF = re.compile(
+    r"\b(Chapters?|Sections?|Equations?|Eq\.|Figures?|Fig\.|Tables?)(\s+)(\d+(?:\.\d+)+)",
+    re.IGNORECASE,
+)
+
+
+def _decade_to_words(num: int) -> str:
+    """A round decade: 1890 -> 'eighteen nineties', 1900 -> 'nineteen hundreds', 2000 -> 'two
+    thousands', 2010 -> 'twenty tens', 90 -> 'nineties'."""
+    high, low = divmod(num, 100)
+    if low == 0:
+        if num % 1000 == 0:
+            return f"{int_to_words(num // 1000)} thousands"
+        return f"{int_to_words(high)} hundreds"
+    tens = low // 10
+    decade = "tens" if tens == 1 else _DECADE_PLURAL[_TENS[tens]]
+    return decade if high == 0 else f"{int_to_words(high)} {decade}"
+
+
+def handle_decades(text: str) -> str:
+    return _DECADE.sub(lambda m: _decade_to_words(int(m.group(1) + "0")), text)
+
+
+def handle_cross_references(text: str) -> str:
+    return _XREF.sub(lambda m: f"{m.group(1)}{m.group(2)}{section_to_words(m.group(3))}", text)
+
+
 def _spell_exponent(exp: str) -> str:
     if exp == "2":
         return " squared"
@@ -144,8 +180,22 @@ def spell_numbers(text: str) -> str:
     # Standalone numbers (no letter or digit on either side, so the whole run is
     # consumed) become cardinal words. A trailing "." or "," is left alone so
     # sentence periods and list commas survive.
+    # An ASCII x/X directly between two numbers ("512x512", "1.5x3", "2.3x10") is a dimension or a
+    # multiplication, NOT a code or glued unit: read it as " times " (matching latex._TIMES_X, and
+    # correct for scientific notation, unlike "by"). Runs FIRST so each operand is then spelled
+    # normally (a decimal "1.5" stays "one point five", not "one.five"). The gao thesis uses the
+    # unicode "x" for multiplication, which clean_markup already handles.
+    text = re.sub(r"(?<=\d)\s*[xX]\s*(?=\d)", " times ", text)
     standalone = r"(?<![A-Za-z0-9])(?:\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)(?![A-Za-z0-9])"
     text = re.sub(standalone, lambda m: number_to_words(m.group(0)), text)
+    # An alphanumeric CODE (a part/model/serial like "9657K286" where a digit run is followed by
+    # letters and THEN more digits) is read digit by digit, never as a cardinal "nine thousand...".
+    # A plain quantity+unit ("56mM") has no trailing digit, so it is left for the rule below.
+    text = re.sub(
+        r"(?<![A-Za-z0-9])(\d+)(?=[A-Za-z]+\d)",
+        lambda m: f" {_digits_to_words(m.group(1))} ",
+        text,
+    )
     # A quantity glued to a following word (56mM, 10x): cardinal, split off the word
     # so the unit/word can be matched on the next normalization pass.
     text = re.sub(
@@ -187,6 +237,10 @@ def normalize_numbers(text: str) -> str:
     text = unicode_exponents_to_ascii(text)
     text = handle_superscripts(text)
     text = handle_subscripts(text)
+    # Cross-references and decades read whole dotted/round numbers before the generic decimal
+    # pass would split them ("2.3.1" -> "two point three" + stray ".one"; "1890s" -> cardinal).
+    text = handle_cross_references(text)
+    text = handle_decades(text)
     text = handle_ranges(text)
     text = handle_negatives(text)
     text = handle_percent(text)

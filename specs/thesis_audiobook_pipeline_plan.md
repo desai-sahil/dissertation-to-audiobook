@@ -1,202 +1,213 @@
-# Thesis-to-Audiobook Pipeline: Planning Spec
+# Thesis-to-Audiobook Pipeline: Functional Spec
 
-**Status:** planning phase, no implementation yet
-**Purpose:** instructions for the agents that will build each stage
-**Input:** a rendered PDF (universal lowest-common-denominator). Word and LaTeX sources are optional fast paths, see "Source-aware fast path" below.
-**Output:** a navigable audiobook (M4B with chapter markers, or per-chapter MP3) generated via ElevenLabs.
+**Status:** built and validated end to end on full theses (Jain ~360pp, Gao). This is the
+functional spec (what each stage does); [thesis_audiobook_build_spec.md](thesis_audiobook_build_spec.md)
+is the engineering spec (how it is built and tested). When they disagree: this doc wins on behavior.
+**Input:** a PDF, ingested via Marker/MinerU markdown (recommended) or an offline poppler fallback.
+**Output:** a navigable audiobook (chaptered M4B/MP4 plus a whole-book MP3) via ElevenLabs.
 
 ---
 
-## 0. Design principles (read first)
+## 0. Design principles
 
-1. **Never go PDF to text to TTS directly.** Go PDF to a structured document model (the IR), then to a reviewable spoken script, then to audio. Each transformation is a pass over the IR. The IR is the contract between agents.
-2. **Two review gates.** Gate A (optional) after structure extraction, for messy PDFs. Gate B (mandatory) is the spoken script, reviewed and editable *before* any TTS spend. TTS at thesis scale costs real money and is the last place you want to discover a mispronunciation.
-3. **The lexicon is a first-class, reusable artifact.** Domain pronunciations and expansions (gs, psi_xyl, slac1) live in a versioned file, not hard-coded. It is reused across every thesis in the same field.
-4. **Configurable by listener.** A committee member wants more rigor (some equations, citations). A family listener wants almost none. One profile flag drives equation verbosity, citation policy, and table handling.
-5. **Idempotent and cached.** Cache TTS per chunk keyed by a hash of (text, voice, model, settings, dictionary version). A small script edit should re-render only the changed chunks, not the whole thesis.
-6. **Keep provenance.** Every spoken chunk carries a back-pointer to its source location (chapter, page, block id). This enables debugging, and later a read-along feature.
+1. **Never go PDF to text to TTS directly.** Go PDF -> a structured document model (the IR) -> a
+   reviewable spoken script -> audio. Each transformation is a pass over the IR; the IR is the
+   contract between stages.
+2. **Two review gates.** Gate A: structure warnings + the `out/<slug>.structure.md` map after
+   parsing/cartography. Gate B (the important one): the reviewable spoken script + the
+   `out/<slug>.ledger.md` of every judgment, vetted *before* any TTS spend. TTS at thesis scale
+   costs real money; it is the last place to discover a mistake.
+3. **Claim-safety over cleverness.** The LLM never writes narration from scratch. It emits labels,
+   enums, or `find -> replace` edits; deterministic code renders; deterministic guards validate
+   risky edits. The author's data and claims (numbers, signs, units, findings) are never altered -
+   only how *notation* is voiced, and (in copy-edit mode) the author's mechanical errors, are fixed.
+4. **Lean on the model + a ledger, not a per-thesis regex treadmill.** Per-thesis variability
+   (which regions exist, novel pronunciations, source typos, extraction artifacts) is handled by the
+   LLM stages under guards and logged to the ledger. General bugs that hold across theses are fixed
+   once, deterministically.
+5. **Configurable by listener.** A `committee` profile keeps more (summarized tables); a `general`
+   profile keeps less (tables skipped). Both announce equations by number and discard citation
+   machinery.
+6. **Idempotent and cached.** TTS is cached per chunk; each LLM stage is cached by a versioned
+   content key. A small edit re-renders only the changed chunk and its seams.
+7. **Keep provenance.** The IR `text` field is never overwritten; every chunk back-points to its
+   source blocks; `out/<slug>.provenance.json` maps audio timestamps to block ids.
 
 ---
 
 ## 1. The intermediate representation (IR)
 
-A single JSON document that every stage reads and writes. Sketch:
+A single typed document every stage reads and writes (see the build spec for the models). Sketch:
 
 ```json
 {
   "meta": {"title": "...", "author": "...", "degree_date": "...", "profile": "committee"},
   "blocks": [
-    {
-      "id": "ch1.p3",
-      "type": "paragraph|heading|figure_caption|table|equation_display|equation_inline|footnote|reference_list|frontmatter|backmatter|code",
-      "chapter": 1, "section": "1.2", "page": 14,
-      "text": "...raw text...",
-      "spoken": null,
-      "keep": true,
-      "handling": "speak|skip|gloss|summarize|announce",
-      "refs": ["bib:smith2019"],
-      "latex": "...for equations...",
-      "notes": "judgment calls flagged here"
-    }
+    {"id": "m12", "type": "paragraph|heading|figure_caption|table|equation_display|equation_inline|footnote|reference_list|frontmatter|backmatter|code",
+     "chapter": 1, "section": "1.2", "page": 14, "text": "...source...", "spoken": null,
+     "keep": true, "handling": "speak|skip|summarize|announce", "refs": [], "latex": "...", "notes": []}
   ],
-  "figures":  {"fig3": {"caption": "...", "ref_points": ["ch2.p7"]}},
-  "equations":{"eq4": {"latex": "...", "gloss": null}},
-  "tables":   {"tab1": {"raw": "...", "summary": null}},
-  "citations":{"[12]": {"bib_key": "jain2025", "spoken": "Jain and colleagues, 2025"}},
-  "bibliography": {"jain2025": {"authors": [...], "year": 2025, "title": "..."}}
+  "figures": {"...": {...}}, "equations": {"...": {...}}, "tables": {"...": {...}},
+  "script": "...assembled spoken script...",
+  "chunks": [{"id": "c1", "text": "...", "chapter": 1, "block_ids": ["m12"], "prev_id": null, "next_id": "c2"}]
 }
 ```
 
-`text` is the source. `spoken` is filled in by later stages. Stages never overwrite `text`; they only populate `spoken`, `handling`, `keep`. This keeps every transformation auditable.
+`text` is the source and is never overwritten; `spoken` is filled by later stages; `script`/`chunks`
+are derived by the assembler. There is no `citations`/`bibliography` map (citations are discarded).
+The cartographer's `StructureMap` (claim-safe regions) is held on the Context, rendered to
+`structure.md`, and applied to block types deterministically.
 
 ---
 
-## 2. Stage-by-stage agent briefs
+## 2. Pre-pipeline: ingest + extraction repair (phases 1-2)
 
-### Agent 1 — Ingest and Parse
-**Goal:** PDF to structured markdown plus registries.
-**Do:**
-- Run **Marker** as the primary parser (best all-round structure and math fidelity, fast, local). Use **MinerU** instead when the thesis is equation-heavy and Marker's math output is weak (MinerU has the strongest LaTeX formula recovery).
-- Run **GROBID** in parallel, purely to get (a) the bibliography parsed into structured entries and (b) inline citation markers linked to those entries. This is the only tool that reliably does the citation-to-bibliography linkage that the reference-verbalizing stage depends on.
-- Emit: structured markdown, a figure registry (caption + bounding box + page), an equation registry (LaTeX where available, else a page-region image for later OCR), a table registry, and the GROBID citation map and reference list.
-**Watch for:** all parsers mis-detect heading levels and reading order on complex layouts. Flag low-confidence pages for Gate A review rather than silently guessing.
-**Acceptance:** chapters and sections recovered in correct order; bibliography parsed; at least 90 percent of inline citations linked.
+Run once per thesis to produce a clean markdown the pipeline ingests.
 
-### Agent 2 — Document Model Builder
-**Goal:** merge parser outputs into the canonical IR and clean PDF artifacts.
-**Do:**
-- De-hyphenate words split across line breaks (photosyn- \n thesis to photosynthesis).
-- Normalize ligatures (fi, fl) and unicode quirks.
-- Repair reading order; strip running headers, footers, page numbers, line numbers.
-- Tag every block with a `type`. Attach each figure caption to its figure; attach footnotes to their anchor.
-- Merge the GROBID citation map into the `citations` table.
-- Identify and tag front matter (title page, TOC, list of figures, list of tables, abstract) and back matter (appendices, SI, bibliography).
-**Acceptance:** clean IR with typed blocks, no hyphenation artifacts, captions and footnotes correctly associated.
+**Marker (or MinerU), run standalone.** Marker gives the best structure + math fidelity; it is kept
+out of this project's venv (pin conflicts) and run as an isolated tool, producing markdown that the
+pipeline reads via `--markdown`. Poppler (`pdftotext`) is the in-repo offline fallback for quick
+tests; it mangles dense notation, so Marker is preferred for the deliverable.
 
-### Agent 3 — Content Selection and Filtering
-**Goal:** decide what gets spoken, driven by the profile.
-**Default rules:**
-- **Skip entirely:** TOC, list of figures, list of tables, page numbers, the raw bibliography block (citations are voiced inline instead).
-- **Keep, configurable:** abstract (keep), acknowledgments (keep, nice for family and committee), appendices and SI (skip by default, toggle on).
-- **Special handling:** equations to Agent 4, tables to Agent 5, captions to Agent 5, citations to Agent 6.
-**Profiles:**
-- `committee`: equations glossed not skipped, citations brief, tables summarized.
-- `general`: equations mostly skipped with a pointer, citations dropped or first-author-only, tables skipped with a one-line note.
-**Acceptance:** every block has `keep` and `handling` set.
-
-### Agent 4 — Math and Notation Transformer
-**Goal:** make math listenable without belaboring it. Three tiers, chosen by profile.
-- **Inline symbols and variables (always voiced):** map via the lexicon. gs to "stomatal conductance", psi_xyl to "xylem water potential", R^2 to "R squared", A_n to "net assimilation rate". Greek letters to names where no domain expansion exists (psi to "psi", mu to "mu").
-- **Display equations (the 3-compartment hydraulic ODEs, MCMC likelihoods):**
-  - `general`: announce and point. "Equation 4 expresses total conductance as a function of the soil, xylem, and outer-xylem compartments." Do not read the equation.
-  - `committee`: LLM-generated one-sentence gloss from the equation's LaTeX. Feed LaTeX to the model, ask for a single spoken sentence capturing what the equation says, not how it is typeset.
-  - `full` (rare, opt-in): convert to spoken math with an accessibility engine (MathCAT or the MathJax Speech Rule Engine) from MathML or LaTeX. Use sparingly; literal display-equation reading is fatiguing.
-- **Simple inline equations (A = gs * D):** voice as "A equals gs times D" or skip per profile.
-**Note:** when only a rendered image of an equation exists (no LaTeX), OCR it first (Nougat, or an LLM vision pass) to recover LaTeX before glossing.
-**Acceptance:** no display equation is read verbatim under default profiles; every inline symbol resolves through the lexicon.
-
-### Agent 5 — Figure, Table, and Caption Verbalizer
-**Goal:** clean captions for the ear, and decide where they are spoken.
-**Captions:**
-- Expand "Fig. 3" to "Figure 3", panel labels "(A)" to "Panel A".
-- Normalize stats and units inside captions (see Agent 6 rules): "n=6" to "n equals six", "*p<0.05" to "asterisk, p less than zero point zero five", "umol m^-2 s^-1" to "micromoles per meter squared per second".
-- **Placement decision:** read the caption at the first in-text reference point ("as shown in Figure 3"), not at the figure's physical location in the PDF (which lands mid-paragraph in reading order). Fall back to end-of-section if no reference is found.
-**Tables:** cannot be read cell by cell. Default: LLM produces a single spoken sentence summarizing the table ("Table 1 reports gas-exchange parameters for wild type and the GhSLAC1 knockout across four water potentials"). `general` profile: skip with a one-line note.
-**Acceptance:** captions are fluent when read aloud; no raw table grids reach the script.
-
-### Agent 6 — Text Normalizer for TTS (the heavy stage)
-**Goal:** turn clean text into speakable text. This is mostly a deterministic rules engine plus the lexicon. Categories:
-- **Numbers and stats:** "37%" to "thirty-seven percent"; "p<0.05" to "p less than zero point zero five"; "5.2 +/- 0.3" to "five point two, plus or minus, zero point three"; "10^-3" to "ten to the minus three"; "2-8" (en dash range) to "two to eight"; "R-hat from 2-8" handled as a range.
-- **Units:** "umol m^-2 s^-1", "CO2" to "C O two", "H2O" to "water" (or "H two O" per lexicon), "kPa", "MPa".
-- **Acronyms:** lexicon decides spell-out-as-letters vs expand. "WT" to "wild type", "MCMC" to "M C M C", "FDR" to "false discovery rate", "ODE" to "O D E", "ABA" to "A B A".
-- **Gene and mutant names:** these read terribly by default. Lexicon entries for slac1, ost1-3, aao3-2, GhSLAC1 with chosen spoken forms (gene nomenclature is usually spoken as letters plus number, confirm your lab's convention).
-- **Cross-references:** "see Section 3.2" to "see section three point two", "as in Chapter 1" voiced naturally.
-- **Sentence segmentation:** use a segmenter that knows scientific abbreviations (et al., e.g., i.e., Fig., vs., approx., cf.) so they do not trigger false sentence breaks and bad TTS pauses.
-**Key architecture choice:** prefer doing expansions in the **ElevenLabs pronunciation dictionary** (alias rules) rather than rewriting the script text, so the human-readable script at Gate B stays readable ("gs" stays "gs" on the page, but speaks as "stomatal conductance"). Use script-level rewriting only for things a reviewer needs to see expanded (numbers, stats).
-**Acceptance:** script contains no raw notation that a voice would mangle; the lexicon covers all recurring domain terms.
-
-### Agent 7 — Script Assembler
-**Goal:** produce the reviewable spoken script and the chunk plan.
-**Do:**
-- Insert structural announcements: "Chapter 1. A review of stomatal conductance models." "Section 2.3, Results."
-- Insert intro (title, author, "an audiobook rendering of the doctoral dissertation of...") and a short outro.
-- Insert pauses. Use `<break time="x.xs"/>` tags after headings and between sections, sparingly (too many break tags cause audio instability on ElevenLabs). Note: `multilingual_v2` honors break tags; `v3` does not, use sentence-final periods for pacing there.
-- Emit two artifacts: the **human-readable script** (markdown, for Gate B) and the **chunk plan** (ordered list of chunks with text, chapter, ids, neighbor pointers).
-**Gate B happens here.** The user proofreads and edits the script. Edits flow back into the IR and only changed chunks lose their cache entry.
-
-### Agent 8 — Lexicon and Pronunciation Manager
-**Goal:** maintain and publish the domain lexicon.
-**Lexicon entry schema:**
-```json
-{"grapheme": "gs", "type": "alias", "alias": "stomatal conductance",
- "case_sensitive": true, "word_boundaries": true, "scope": "plant-physiology"}
-{"grapheme": "psi", "type": "phoneme", "phoneme": "saɪ", "alphabet": "ipa", "model": "flash_v2"}
-```
-**Do:** push the lexicon to an ElevenLabs pronunciation dictionary via the `add-from-rules` endpoint; store the returned dictionary id and version id; pass those as `pronunciation_dictionary_locators` on every TTS request.
-**Model caveat:** alias rules work on all models including `multilingual_v2`. Phoneme/IPA rules only apply on `flash_v2` and `v3`. Most of your needs (gs, psi_xyl, gene names) are alias rules, so `multilingual_v2` is fine. Reserve phoneme rules for the handful of Greek letters where the alias spelling still misreads.
-
-### Agent 9 — TTS Renderer
-**Goal:** chunk text to audio, with continuity and caching.
-**Do:**
-- Chunk at sentence or paragraph boundaries, staying under the per-request limit (5,000 chars paid; keep chunks to roughly 1,500-2,500 chars for stability and cheap re-rendering).
-- Model: `eleven_multilingual_v2` for the final deliverable (highest narration quality). Use `flash_v2_5` for cheap previews. Consider `v3` only if you want expressive delivery and can tolerate lower pronunciation consistency and no SSML breaks.
-- For prosody continuity across chunks, pass `previous_text` and `next_text` (or `previous_request_ids` / `next_request_ids`, max 3) so chunk boundaries do not sound clipped.
-- Set `seed` for reproducibility. Decide `apply_text_normalization`: since Agent 6 already normalized, consider `off` to avoid double handling, but test, ElevenLabs normalization is decent and `auto` may be safer for stray cases.
-- Attach the pronunciation dictionary locators.
-- **Cache** each chunk's audio by hash(text, voice, model, settings, dict_version). Skip unchanged chunks on re-render.
-- Retry on failures; ElevenLabs allows up to 2 free regenerations for identical content.
-**Cost control:** before a full render, estimate characters (a thesis is roughly 50,000-100,000 words, about 300,000-600,000 characters) and surface the cost using current per-character pricing (check the pricing page, it shifts). Always render a single preview chapter first.
-**Alternative MVP path:** ElevenLabs **Studio** (formerly Projects) handles long-form chunking and stitching for you (up to 200 chapters, 400 paragraphs each). It is faster to stand up but gives less programmatic control over per-chunk normalization and caching. Trade-off flagged for decision below.
-
-### Agent 10 — Audio Assembler
-**Goal:** assemble chunks into the deliverable.
-**Do:**
-- Concatenate chunk MP3s per chapter (ffmpeg).
-- Build an **M4B** with chapter markers (ffmpeg plus a chapter metadata file, or AtomicParsley) so the audiobook is navigable. Alternatively emit per-chapter MP3s.
-- Embed metadata: title, author, narrator (voice name), year.
-- Keep the provenance map (audio timestamp to source block) as a sidecar for debugging and future read-along.
-**Acceptance:** a single navigable audiobook file plus per-chapter files, with correct chapter titles and metadata.
+**Extraction repair (`repair-extraction`), two-pass and guarded.** Pass 1: the model proposes two
+kinds of edit on the raw markdown - `noise` (typographic/OCR: detached accents, stray spacing,
+case-preserving) and `artifact` (de-shred Marker-mangled notation: a decimal split into per-character
+`<sup>` tags, a Miller index written as `< <sup>111</sup> >`, glued scientific notation). Code
+applies only edits that pass a guard: `noise` must preserve the exact word-token sequence and case;
+`artifact` must restore the value using ONLY the digits/symbols already present (ordered digits
+identical, no value symbol dropped or invented, no new letter) - so it may re-render `<sup>0</sup>.1`
+-> `0.1` but can never turn `0.15` into `0.5`. Pass 2 re-reads the cleaned markdown and flags
+residual defects. Output: `*.cleaned.md` + a `*.repair-report.md`. `check-extraction` is the
+read-only audit alone.
 
 ---
 
-## 3. Source-aware fast path
+## 3. The pipeline stages (phase 3 onward)
 
-PDF is the universal input and the reach play, but it is the hardest. When the original **LaTeX or Word** source is available, prefer it: structure and real math source are already present, so Agents 1 and 2 mostly collapse. Your existing `thesis_audio` LaTeX-to-MP3 work becomes the fast path; the PDF pipeline is the general fallback. Detect input type at ingest and route accordingly.
+Order: ingest -> build_ir -> structurer -> cartographer -> select -> curate -> math -> figures ->
+citations -> normalize -> appendix_signpost -> assemble_script -> script_repair -> script_qc ->
+lexicon -> tts -> assemble_audio. The first LLM stages (structurer, cartographer, curate) run on the
+clean markdown; each is a no-op offline (mock LLM).
+
+**Ingest + build_ir (document model).** Parse the markdown into typed `Block`s; clean PDF artifacts
+(de-hyphenate line breaks, normalize ligatures/mojibake, reflow across page breaks, strip running
+headers/footers/page numbers, attach captions/footnotes), tag a `BlockType`, and tag front/back
+matter. Low-confidence structure -> `WarningsSink` (Gate A), never a silent guess.
+
+**Structurer (LLM block-kind classifier).** Corrects each block's *kind* (prose / heading /
+equation / code / figure / table / reference / frontmatter) so non-narratable material (a source-code
+appendix, fenced or spaced-out) is typed `code` and skipped whatever the formatting. Claim-safe
+(returns only a kind per block id), cached one call/doc, every change logged to
+`structure-changes.md`. `--no-structurer` disables it.
+
+**Cartographer (LLM structure map).** Reads a compact outline once and returns `Region`s: which
+spans are chapters/body (include) vs table of contents, lists, per-chapter and main bibliographies,
+and appendices (skip). It emits only enums + EXISTING block-id spans + a verbatim label (shown only
+in `structure.md`), so it cannot inject audio. Corrected types flow into `select`. Rescues theses
+whose heading scheme `build_ir` cannot detect alone. `--no-structure-eval` disables it.
+
+**Select (content selection, deterministic, profile-driven).** Sets `keep`/`handling` per block.
+Skip: TOC, lists of figures/tables, page numbers, bibliographies, code, appendices (default).
+Keep: body, abstract, biographical sketch, acknowledgements, dedication. Special handling: equations
+-> announce, tables -> summarize/skip, captions -> skip.
+
+**Curate (LLM pronunciation manager).** Returns a pronunciation plan: acronyms (expand on first use,
+then a spelled short form), domain terms (phonetic reads), flattened-notation reads, and
+de-hyphenations. It changes only *how* terms are said, never the prose. Single-letter and bare
+Greek-letter keys are ignored (they collide with initials, the article "A", and overloaded
+symbols). Cached one call/doc; written to `qa.md`. `--no-curate` disables it.
+
+**Math (announce, not gloss).** Display equations are announced by their real number ("Equation two
+point three"); unnumbered intermediate steps are dropped. There is no LLM gloss - an earlier gloss
+tier was removed because it hallucinated. Inline symbols/variables are voiced via the lexicon and
+the normalizer.
+
+**Figures + tables.** Figure/table captions are skipped (heavily visual). Tables: `committee`
+summarizes via one LLM sentence; `general` skips with a note.
+
+**Citations (machinery to discard, NotebookLM-style).** Deterministically strip reference markers -
+bracketed `[12]`, superscript numbers, period/comma-fused `word.41` / `group,20, 21`, parenthetical
+`(Geiger et al., 2009)`, `et al.,N`. Narrative author mentions ("Chalmer et al. note that...") are
+genericized to one phrase from a FIXED plural set ("researchers note that...") via a cached LLM call
+that maps each mention to a phrase (claim-safe; offline degrades to "and others"). No bibliography is
+parsed or read.
+
+**Normalize (the heavy deterministic rules engine).** Turn clean text into speakable text: numbers
+and stats ("37%" -> "thirty-seven percent", "p<0.05", "5.2 +/- 0.3", ranges, decades, scientific
+notation, NxM dimensions -> "times"), units (full spoken words), acronyms, Greek, cross-references
+("Section 2.3" -> "section two point three"), LaTeX/markup flattening, mojibake, repetition cleanup,
+and sentence segmentation that knows scientific abbreviations. Runs to a fixed point (idempotent) and
+guarantees the no-leak invariant (no raw notation survives). Glosses/summaries are re-normalized too.
+
+**Appendix signpost.** When appendices are skipped, the first in-text "Appendix X" reference per
+chapter gets one fixed spoken aside ("...referenced in the appendix, not included here..."); the
+rest pass through. Deterministic detection + fixed template = claim-safe.
+
+**Assemble script (Gate B).** Insert structural announcements ("Chapter 1. ..."), an intro/outro,
+and sparing pauses, then emit the reviewable `script.md` and the `chunks.json` plan (ordered chunks
+with neighbor pointers). This is the proofread-before-you-pay artifact.
+
+**Script repair (the writer + copy-edit).** A bounded loop (up to 3 rounds) where a writer proposes
+small `find -> replace` edits, applied whole-token, re-reading until a round changes nothing. In the
+default **copy-edit** mode it fixes how notation is voiced AND the author's clear mechanical errors
+(spelling typos, fused words, meaning-preserving grammar/readability) and pure-text extraction
+artifacts - each tagged by kind, each cleared by the deterministic `copyedit_guard` (values, polarity
+words, and directional result words preserved; at most one content-word substitution; the author's
+data/claims never changed - a suspected number/sign error is flagged, not edited). `--as-written`
+restores strict notation-only. Every applied/rejected edit is logged to the ledger.
+
+**Script QC (the pre-TTS gate, bounded loop).** An Opus sweep audits the finished script for
+pipeline defects (leaked markup, garble, truncation, a number voiced wrong, a reference left
+unread); if any, one Sonnet fix pass turns them into guarded edits; a single Opus confirm re-audits.
+Flags whose location is not a verbatim substring are dropped (honesty filter). HIGH-severity flags
+block a billed render (override with `--force`). `--no-qc-loop` keeps only the read-only audit.
+
+**Lexicon + TTS + assemble_audio (phase 5).** Publish the pronunciation dictionary; render chunks
+(content-addressed cached, neighbor `previous_text`/`next_text` for prosody, `eleven_multilingual_v2`
+for the deliverable, flash for previews); concat + chapterize via ffmpeg into the chaptered file +
+whole-book mp3, embed metadata + cover, and write the provenance sidecar.
 
 ---
 
 ## 4. Cross-cutting concerns
 
-- **Profiles / config:** one config object (`profile`, equation tier, citation policy, table handling, include_appendices, voice_id, model_id). Drives Agents 3-7 and 9.
-- **Caching:** chunk-level, as above. The single biggest cost saver across edit-render cycles.
-- **Cost estimator and preview mode:** mandatory before full render.
-- **QA pass:** spot-listen the first and last chunk of each chapter and any chunk flagged low-confidence at parse time.
-- **Provenance:** retain throughout for debugging and read-along.
+- **Profiles / config:** one `Config` + a TOML `Profile`; drives select, math, figures, tts.
+- **Caching:** chunk-level TTS + per-stage versioned LLM caches; the biggest cost saver across
+  edit-render cycles. Re-running unchanged markdown reuses LLM results with no billing.
+- **Cost estimator + preview:** `--dry-run` (no calls) and `--preview` (first chapter) are mandatory
+  before a full render.
+- **The update ledger** (`ledger.md`): one reviewable record of every judgment - structure
+  inferred, pronunciation plan, citation genericizations, author corrections / extraction artifacts /
+  rejected-flagged edits. The accountability layer for leaning on the LLM.
+- **Live status spinner:** a one-line stderr spinner shows the current stage / agent loop during a
+  real run (isatty-gated; silent in pipes/CI; never changes output).
+- **Provenance + QA:** retained throughout for debugging and a future read-along.
 
 ---
 
-## 5. Open decisions for you (judgment calls flagged, not silently made)
+## 5. Resolved decisions (the original "open" calls, now settled)
 
-1. **Default target listener:** `committee` or `general`? This sets the defaults for equations, citations, and tables. My lean: ship `committee` as default since your committee members are the real first users, with a one-flag switch to `general`.
-2. **Citation policy default:** drop, brief (first author + year), or full? My lean: `brief`, since dense citation lists read terribly in full and dropping loses attribution your committee will notice.
-3. **Equation default tier:** announce-and-point vs LLM-gloss. My lean: gloss for `committee`, announce for `general`.
-4. **Output container:** M4B with chapter navigation, or flat per-chapter MP3? My lean: M4B, it is what makes this an audiobook rather than a long voice memo.
-5. **Voice model:** `multilingual_v2` (quality, recommended for the deliverable) vs `flash_v2_5` (cheap previews) vs `v3` (expressive, less consistent, no SSML breaks). My lean: `multilingual_v2` final, `flash_v2_5` preview.
-6. **Build path:** own chunked-TTS pipeline (full control, caching, custom normalization, more code) vs ElevenLabs Studio long-form API (faster MVP, less control). My lean: own pipeline given your caching and determinism goals, but Studio is the faster way to a first listenable draft.
-7. **Read-along feature:** keep the provenance source-map now to enable a future synchronized-text view, even if you do not build the viewer yet? Low cost to retain, high cost to reconstruct later.
+1. **Default listener:** `committee` (the real first audience), one flag to `general`.
+2. **Citations:** neither brief nor full - **discarded as machinery** and narrative mentions
+   genericized (NotebookLM-style). No bibliography is read.
+3. **Equations:** **announce by number**, never LLM-glossed (the gloss hallucinated). `full` exists
+   but is opt-in.
+4. **Author's text:** by default **copy-edited** for mechanical errors (typos/grammar/spacing) under
+   a deterministic claim-safety guard; `--as-written` reads strictly verbatim. The author's data and
+   claims are never auto-changed.
+5. **Output container:** chaptered **M4B/MP4** plus a whole-book MP3.
+6. **Voice model:** `eleven_multilingual_v2` for the deliverable, flash for previews.
+7. **Build path:** own chunked-TTS pipeline (control, caching, determinism), not Studio.
+8. **Read-along:** provenance source-map retained now to enable a future synchronized view.
 
 ---
 
-## 6. What was easy to miss (added beyond the original brief)
+## 6. What the original brief missed (now in the pipeline)
 
-- The reviewable spoken script as a proofread-before-you-pay gate.
-- Tables (the original brief covered figures, equations, references, but not tables).
-- Footnotes, endnotes, front matter, back matter, and appendices/SI policy.
-- Cost control, preview mode, and chunk-level caching at thesis scale.
-- Chapter navigation (M4B) vs a flat audio file.
-- Cross-references ("see Section 3.2") voiced naturally.
-- Units and statistics notation as a distinct normalization category from equations.
-- Gene and mutant name pronunciation (slac1, ost1-3, aao3-2).
-- PDF extraction artifacts: de-hyphenation, ligatures, reading order, headers/footers.
-- Using the ElevenLabs pronunciation dictionary as the production mechanism (so the script stays readable) rather than rewriting text in place.
-- Sentence-segmentation pitfalls from scientific abbreviations.
+The reviewable script + ledger as a pay-gate; the structurer + cartographer for robust structure
+across theses; the copy-edit stage + deterministic guards; the two-pass extraction repair with
+artifact de-shredding; the bounded pre-TTS QC loop; tables, footnotes, front/back matter, appendix
+signposting; cost control, preview, chunk-level caching; chapter navigation; cross-references; units
+and statistics as a normalization category distinct from equations; gene/mutant and Greek
+pronunciation; PDF extraction-artifact handling; and the markdown-ingestion path that lets Marker run
+isolated.

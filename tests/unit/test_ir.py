@@ -11,7 +11,6 @@ def test_tiny_ir_validates(tiny_ir_path: Path) -> None:
     assert len(doc.blocks) == 11
     assert doc.blocks[0].type is BlockType.frontmatter
     assert "fig1" in doc.figures
-    assert "smith2019" in doc.bibliography
 
 
 def test_ir_round_trips(tiny_ir_path: Path) -> None:

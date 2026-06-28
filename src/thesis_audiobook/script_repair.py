@@ -1,22 +1,16 @@
-"""Guarded, claim-safe repair of the narration SCRIPT (pure core).
+"""LLM repair of the narration SCRIPT: fix how NOTATION is vocalized. Pure core, no I/O.
 
-The phase-4 script QC flags read-aloud defects but never edits (claim-safety). This module is
-the safe auto-fix layer that mirrors the extraction repair: the model proposes {find -> replace}
-pronunciation/normalization swaps, and we apply ONLY the ones that pass a no-fabrication guard,
-deterministically (the model call is cached, so a given script repairs identically). The script
-QC then re-audits the repaired script, so the gate reflects the post-repair state.
+The model reads the finished script and proposes small {find -> replace} edits that fix how
+existing text READS ALOUD - units and symbols spoken in full, leaked LaTeX/markup turned into
+words, chemical formulas voiced as their name, number/ordinal spacing artifacts. The edits are
+applied as written (the model is trusted within this narrow scope) and every one is recorded in
+the ledger for human review.
 
-The guard is the safety invariant. Unlike the extraction repair (which preserves the exact word
-sequence), a SCRIPT repair is allowed to change words - that is the point ("CO squared" ->
-"carbon dioxide", "mm" -> "millimeters"). What it must NEVER do is fabricate content: introduce a
-number, a year, or a proper name the model cannot actually verify. So an edit is applied only if
-its replacement adds no FACTUAL token (a digit-bearing word, a spoken number/ordinal word, or a
-capitalized proper noun) that is not already in the text it replaces. This auto-applies pure
-pronunciation fixes and rejects every reconstruction - a guessed number ("...eight hundred
-four..." -> "...eight zero four..."), a fabricated citation year ("Buckley and Mott" -> "Buckley
-and Mott twenty thirteen"), an asserted name ("& Sack" -> "Scoffoni and Sack"), or a cross-
-reference change ("first chapter" -> "second chapter"). Those go to human review, never applied.
-This module is pure; the cached model call and file writes live in the stage and the CLI.
+SCOPE, by design (not a content filter): this only changes how NOTATION is voiced. It does NOT
+correct the author's spelling, grammar, word choice, or the pronunciation of ordinary words and
+names - those are the author's and the audiobook reads the thesis as written. Edits are applied
+on WHOLE TOKENS only (word boundaries), so a unit fix like "mm" -> "millimeters" can never rewrite
+the middle of a word ("committee"). The cached model call and file writes live in the stage/CLI.
 """
 
 from __future__ import annotations
@@ -25,129 +19,63 @@ import json
 import re
 from typing import Any
 
+from thesis_audiobook.copyedit import copyedit_guard
 from thesis_audiobook.extraction_qc import ExtractionIssue
 from thesis_audiobook.ir import Chunk, StrictModel
 
-SCRIPT_REPAIR_VERSION = "scriptrepair-v1"
+SCRIPT_REPAIR_VERSION = "scriptrepair-v5"
+# Strict, faithful mode (--as-written): vocalize notation ONLY, never the author's text.
 SCRIPT_REPAIR_SYSTEM = (
-    "You repair how an AUDIOBOOK NARRATION SCRIPT is pronounced. Propose only small find/replace "
-    "swaps that fix how EXISTING text reads aloud. NEVER invent content: do not add or change a "
-    "number, a year, or a name, and do not reconstruct anything garbled - flag those instead. "
-    "Return ONLY the requested JSON; no prose, no markdown fences."
+    "You fix how an AUDIOBOOK NARRATION SCRIPT VOCALIZES notation - nothing else. You turn "
+    "symbols, math notation, units, chemical formulas, leaked markup, and abbreviations into the "
+    "natural spoken words a narrator should say. You do NOT correct the author's spelling, "
+    "grammar, word choice, or the pronunciation of ordinary words and names - those are the "
+    "author's and must be read exactly as written. Make the MINIMAL edit: your `replace` must be "
+    "your `find` with ONLY the notation token changed - keep every surrounding character "
+    "(parentheses, commas, other punctuation, spacing, hyphenation) EXACTLY as in `find`. Never "
+    "add or remove parentheses or commas, never restructure the sentence. Tag every edit "
+    'kind "notation". Return ONLY the requested JSON; no prose, no markdown fences.'
+)
+# Copy-edit mode (--copyedit, the default): also fix the author's clear MECHANICAL errors and
+# extraction artifacts so a listener is not tripped up, but never change a value or a claim.
+SCRIPT_COPYEDIT_SYSTEM = (
+    "You prepare an AUDIOBOOK NARRATION SCRIPT from a scientific thesis so it reads cleanly aloud. "
+    "You make small find/replace edits, and you TAG each with its `kind`:\n"
+    '- "notation": vocalize a symbol/unit/math/chemical formula/leaked markup into spoken words.\n'
+    '- "spelling": fix a clearly misspelled word (a non-word) -> its intended real word.\n'
+    '- "grammar": fix subject-verb agreement or a wrong tense, OR improve READABILITY by adding '
+    "small function words (an article, or 'in' before a unit) or turning a stray unit-parenthesis "
+    "into commas so a measurement reads as a clean spoken clause - e.g. 'R s megapascals seconds "
+    "per kilogram )' -> 'R s, in megapascals seconds per kilogram,'. This is welcome (it adds only "
+    "function words/punctuation); apply it confidently, do NOT call it 'style' or withdraw it.\n"
+    '- "spacing": split fused words or fix missing/extra spacing.\n'
+    '- "extraction_artifact": remove a PDF-extraction leak (stray operator, leaked tag) that is '
+    "not the author's intent.\n"
+    "HARD RULES (a violation is a serious error): NEVER change a number, value, sign, unit, or "
+    "measurement; NEVER add or remove a negation or scope word (not, no, only, all, more, less); "
+    "NEVER insert a claim or hedge (e.g. 'significant'); NEVER PARAPHRASE or swap a content word "
+    "(readability adds only function words/punctuation, it never changes meaning). "
+    "If you suspect a NUMBER, SIGN, UNIT, or FACTUAL error (e.g. a sign that reads wrong), do NOT "
+    "edit it - put it in `issues` for human review. Return ONLY the requested JSON; no fences."
 )
 SCRIPT_REPAIR_MAX_TOKENS = 16_384
-_MAX_SPAN = 120  # a find longer than this is reported, not auto-applied (keeps edits localized)
-
-# Spoken number / ordinal words. Adding one in a replacement is treated as fabricating a value or
-# year, so it is rejected by the guard.
-_NUMBER_WORDS = frozenset(
-    [
-        "zero",
-        "one",
-        "two",
-        "three",
-        "four",
-        "five",
-        "six",
-        "seven",
-        "eight",
-        "nine",
-        "ten",
-        "eleven",
-        "twelve",
-        "thirteen",
-        "fourteen",
-        "fifteen",
-        "sixteen",
-        "seventeen",
-        "eighteen",
-        "nineteen",
-        "twenty",
-        "thirty",
-        "forty",
-        "fifty",
-        "sixty",
-        "seventy",
-        "eighty",
-        "ninety",
-        "hundred",
-        "thousand",
-        "million",
-        "billion",
-        "trillion",
-        "point",
-        "first",
-        "second",
-        "third",
-        "fourth",
-        "fifth",
-        "sixth",
-        "seventh",
-        "eighth",
-        "ninth",
-        "tenth",
-        "eleventh",
-        "twelfth",
-    ]
-)
-_WORD = re.compile(r"[\w']+")
-# Capitalized navigation words are scaffolding, not facts about the thesis, so introducing one
-# is safe (the NUMBER it points at is still guarded as a number-word). This lets the model turn
-# a leaked fragment into "Equation two point nine" without the guard flagging "Equation".
-_STRUCTURAL = frozenset(
-    [
-        "equation",
-        "equations",
-        "section",
-        "subsection",
-        "chapter",
-        "figure",
-        "table",
-        "panel",
-        "appendix",
-        "appendices",
-        "part",
-        "step",
-        "theorem",
-        "lemma",
-    ]
-)
-
-
-def _factual_tokens(text: str) -> set[str]:
-    """Lower-cased tokens that assert a fact: digit-bearing words, spoken number/ordinal words,
-    and capitalized proper nouns (len >= 2, not an all-caps acronym/symbol or a structural word)."""
-    tokens: set[str] = set()
-    for word in _WORD.findall(text):
-        lower = word.lower()
-        is_number = lower in _NUMBER_WORDS or any(ch.isdigit() for ch in word)
-        is_proper = (
-            len(word) >= 2 and word[0].isupper() and not word.isupper() and lower not in _STRUCTURAL
-        )
-        if is_number or is_proper:
-            tokens.add(lower)
-    return tokens
-
-
-def is_safe_script_repair(find: str, replace: str) -> bool:
-    """True iff find->replace cannot fabricate content: the replacement introduces no factual
-    token (number/year/name) absent from the text it replaces. A pure pronunciation swap passes;
-    any reconstruction of a number, year, or name is rejected."""
-    if not find.strip() or find == replace or len(find) > _MAX_SPAN:
-        return False
-    return _factual_tokens(replace) <= _factual_tokens(find)
+_MAX_SPAN = 200  # a find longer than this is skipped (an edit should be a short, localized span)
+# Edit kinds whose `replace` must clear the deterministic copy-edit guard (the author's own text).
+# "notation" keeps its trusted scope; "data" is flag-only and never auto-applied.
+_GUARDED_KINDS = frozenset({"spelling", "grammar", "spacing", "extraction_artifact"})
 
 
 class ScriptRepair(StrictModel):
-    find: str  # exact substring of the script that reads wrong
-    replace: str  # the corrected spoken form (same facts, better pronunciation)
+    find: str  # exact substring of the script whose NOTATION reads wrong aloud
+    replace: str  # the same content, with the notation voiced as spoken words
     reason: str = ""
+    kind: str = "notation"  # notation | spelling | grammar | spacing | extraction_artifact | data
 
 
 class ScriptRepairPlan(StrictModel):
     summary: str = ""
     repairs: list[ScriptRepair] = []
-    issues: list[ExtractionIssue] = []  # defects that need human review, not auto-fixable
+    issues: list[ExtractionIssue] = []  # things the model chose to flag rather than edit
 
     def is_empty(self) -> bool:
         return not self.repairs and not self.issues and not self.summary.strip()
@@ -158,6 +86,7 @@ class AppliedRepair(StrictModel):
     replace: str
     count: int
     reason: str = ""
+    kind: str = "notation"
 
 
 class RejectedRepair(StrictModel):
@@ -166,97 +95,129 @@ class RejectedRepair(StrictModel):
     why: str
 
 
-def apply_script_repairs(
-    chunks: list[Chunk], repairs: list[ScriptRepair]
-) -> tuple[list[AppliedRepair], list[RejectedRepair]]:
-    """Apply guard-passing, locatable repairs to chunk texts in place (all occurrences), longest
-    find first so a shorter edit cannot partially clobber a longer one. Editing chunks (not the
-    flat script) preserves each chunk's block_ids, so provenance survives. Returns (applied,
-    rejected)."""
-    applied: list[AppliedRepair] = []
-    rejected: list[RejectedRepair] = []
-    for edit in sorted(repairs, key=lambda e: len(e.find), reverse=True):
-        if not is_safe_script_repair(edit.find, edit.replace):
-            rejected.append(
-                RejectedRepair(
-                    find=edit.find,
-                    replace=edit.replace,
-                    why="would fabricate content (a number, year, or name) or span too large",
-                )
-            )
-            continue
-        count = sum(chunk.text.count(edit.find) for chunk in chunks)
-        if count == 0:
-            rejected.append(
-                RejectedRepair(find=edit.find, replace=edit.replace, why="not found in script")
-            )
-            continue
-        for chunk in chunks:
-            if edit.find in chunk.text:
-                chunk.text = chunk.text.replace(edit.find, edit.replace)
-        applied.append(
-            AppliedRepair(find=edit.find, replace=edit.replace, count=count, reason=edit.reason)
-        )
-    return applied, rejected
+def _edit_allowed(edit: ScriptRepair, copyedit: bool) -> tuple[bool, str]:
+    """Per-kind gate. NOTATION keeps its trusted scope (the original behavior). Author-text and
+    artifact edits must clear the deterministic copy-edit guard, and only when copy-edit is on.
+    A `data`/claim edit is never auto-applied - it belongs in `issues` for human review."""
+    if edit.kind == "data":
+        return False, "data/claim - flag only, never auto-fixed"
+    if edit.kind in _GUARDED_KINDS:
+        if not copyedit:
+            return False, "copy-edit disabled (--as-written): only notation is fixed"
+        if not copyedit_guard(edit.find, edit.replace):
+            return False, "copy-edit guard: would change a number, polarity, or claim"
+    return True, ""  # notation (or default) - trusted scope
 
 
 def candidate_repairs(
-    script_text: str, repairs: list[ScriptRepair]
+    script_text: str, repairs: list[ScriptRepair], *, copyedit: bool = False
 ) -> tuple[list[ScriptRepair], list[RejectedRepair]]:
-    """Filter proposed repairs to those that pass the deterministic guard AND whose anchor is a
-    verbatim substring of the script. Returns (candidates, rejected). Candidates still must clear
-    the faithfulness auditors before they are applied; this is just the deterministic floor."""
+    """Keep the repairs that can actually be applied: a non-empty, localized find that is a
+    verbatim substring of the script AND passes the per-kind gate (notation trusted; author/artifact
+    edits must clear the copy-edit guard when copy-edit is on; data is flag-only). Returns
+    (candidates, rejected) where rejected covers both un-applicable and guard-blocked edits."""
     candidates: list[ScriptRepair] = []
     rejected: list[RejectedRepair] = []
     for edit in sorted(repairs, key=lambda e: len(e.find), reverse=True):
-        if not is_safe_script_repair(edit.find, edit.replace):
+        if not edit.find.strip() or edit.find == edit.replace or len(edit.find) > _MAX_SPAN:
             rejected.append(
                 RejectedRepair(
-                    find=edit.find,
-                    replace=edit.replace,
-                    why="guard: would fabricate content (number, year, or name) or span too large",
+                    find=edit.find, replace=edit.replace, why="empty, a no-op, or too long a span"
                 )
             )
-        elif edit.find not in script_text:
+            continue
+        if edit.find not in script_text:
             rejected.append(
                 RejectedRepair(find=edit.find, replace=edit.replace, why="not found in script")
             )
-        else:
-            candidates.append(edit)
+            continue
+        allowed, why = _edit_allowed(edit, copyedit)
+        if not allowed:
+            rejected.append(RejectedRepair(find=edit.find, replace=edit.replace, why=why))
+            continue
+        candidates.append(edit)
     return candidates, rejected
 
 
 def apply_one(chunks: list[Chunk], edit: ScriptRepair) -> int:
-    """Apply one edit to the chunk texts in place (all occurrences); returns the count. Editing
-    chunks (not the flat script) preserves each chunk's block_ids, so provenance survives."""
-    count = sum(chunk.text.count(edit.find) for chunk in chunks)
+    """Apply one edit to the chunk texts in place, on WHOLE-TOKEN matches only (word boundaries),
+    so a short find never rewrites the inside of a word ("mm" leaves "committee" alone). Editing
+    chunks (not the flat script) preserves each chunk's block_ids, so provenance survives. Returns
+    the number of replacements."""
+    pattern = re.compile(r"(?<![A-Za-z0-9])" + re.escape(edit.find) + r"(?![A-Za-z0-9])")
+    count = 0
     for chunk in chunks:
-        if edit.find in chunk.text:
-            chunk.text = chunk.text.replace(edit.find, edit.replace)
+        chunk.text, n = pattern.subn(edit.replace, chunk.text)
+        count += n
     return count
 
 
-def build_script_repair_prompt(script: str) -> str:
+_NOTATION_DO = (
+    "- units/symbols spoken as letters or left abbreviated -> full spoken words: 'cm' -> "
+    "'centimeters', 'L over min' -> 'liters per minute', a unit 'omega' -> 'ohms', 'mV over "
+    "V' -> 'millivolts per volt'. (kind: notation)\n"
+    "- leaked LaTeX/markup or a leaked variable/notation string -> its spoken form (or remove "
+    "the leaked tag). (kind: notation or extraction_artifact)\n"
+    "- a chemical formula read as letters -> the compound name where clearly intended: 'S iO "
+    "two' -> 'silicon dioxide'. (kind: notation)\n"
+    "- number/ordinal spacing artifacts: 'thirty th' -> 'thirtieth'. (kind: notation)\n"
+)
+_RETURN_JSON = (
+    "Return ONLY this JSON:\n"
+    '{"summary":"one-paragraph assessment","repairs":[{"find":"exact substring with context",'
+    '"replace":"the same content with the one problem fixed","reason":"what was wrong",'
+    '"kind":"notation|spelling|grammar|spacing|extraction_artifact"}],'
+    '"issues":[{"kind":"broken_gloss|ocr_garble|truncation|suspected_data_error|other",'
+    '"severity":"high|medium|low","location":"short quote","detail":"...","suggestion":"..."}]}'
+)
+
+
+def build_script_repair_prompt(script: str, *, copyedit: bool = False) -> str:
+    if not copyedit:
+        return (
+            "Below is the FINAL audiobook narration script generated from a scientific thesis. "
+            "Propose small find/replace edits that fix how NOTATION is SPOKEN.\n\n"
+            "DO fix (put in 'repairs', kind 'notation'):\n" + _NOTATION_DO + "\n"
+            "DO NOT touch - read it EXACTLY as written, it is the author's text, not yours to "
+            "fix:\n"
+            "- spelling mistakes ('preparaing', 'stomotal') and hyphenation - leave them.\n"
+            "- grammar or awkward sentences - leave them.\n"
+            "- pronunciation of ordinary words or proper names - do NOT add phonetic respellings.\n"
+            "- punctuation and parentheses around the notation - KEEP them.\n"
+            "Keep every number, value, name, claim, and all punctuation exactly as it appears; "
+            "change only how the notation token is voiced.\n\n"
+            "'find' MUST be an exact substring of the script - copy a few words verbatim WITH "
+            "enough surrounding context to be unambiguous (never a bare token like 'mm'), short "
+            "and localized.\n\n" + _RETURN_JSON + "\n\n=== SCRIPT ===\n"
+            f"{script}\n"
+        )
     return (
-        "Below is the FINAL audiobook narration script generated from a scientific thesis. "
-        "Propose small fixes for how EXISTING text reads aloud, and separately flag defects you "
-        "must NOT auto-fix.\n\n"
-        "Safe to repair (put in 'repairs'): a wrong pronunciation/notation of text that is "
-        "already present - 'CO squared' -> 'carbon dioxide', 'mm' -> 'millimeters', 'H two "
-        "degrees' -> 'water', a leaked symbol -> its spoken word. RULE: 'replace' must contain "
-        "NO number, year, or name that is not already in 'find'. You may only change HOW the "
-        "existing words sound; never add a value, a citation year, or an author/proper name, and "
-        "never reconstruct something garbled. 'find' must be an EXACT substring of the script "
-        "(copy it verbatim, a few words), short and localized.\n\n"
-        "NOT safe to auto-fix (put in 'issues', do not invent a 'replace'): a garbled number to "
-        "restore, a missing citation year or author, a wrong cross-reference, truncated content, "
-        "anything where the correct text is uncertain.\n\n"
-        "Return ONLY this JSON:\n"
-        '{"summary":"one-paragraph assessment","repairs":[{"find":"exact substring",'
-        '"replace":"same facts, better pronunciation","reason":"what was wrong"}],'
-        '"issues":[{"kind":"broken_gloss|citation_error|ocr_garble|truncation|other",'
-        '"severity":"high|medium|low","location":"short quote","detail":"...","suggestion":"..."}]}'
-        "\n\n=== SCRIPT ===\n"
+        "Below is the FINAL audiobook narration script generated from a scientific thesis. Propose "
+        "small find/replace edits so it reads cleanly aloud, and TAG each with its `kind`.\n\n"
+        "DO fix (put in 'repairs'):\n" + _NOTATION_DO + "- a clearly MISSPELLED word (a non-word) "
+        "-> its intended real word: 'stomotal' -> 'stomatal', 'preparaing' -> 'preparing'. (kind: "
+        "spelling)\n"
+        "- subject-verb agreement, a wrong tense, OR readability: add a function word ('in' before "
+        "a unit) or turn a stray unit-parenthesis into commas so a measurement reads cleanly, e.g. "
+        "'R s megapascals seconds per kilogram )' -> 'R s, in megapascals seconds per kilogram,'. "
+        "(kind: grammar)\n"
+        "- fused words or missing/extra spacing: 'withincreasing' -> 'with increasing'. (kind: "
+        "spacing)\n"
+        "- a PDF-extraction leak that is not the author's intent (stray operator, leaked tag). "
+        "(kind: extraction_artifact)\n\n"
+        "DO NOT (these change meaning - they are NOT edits, put any you suspect in 'issues'):\n"
+        "- NEVER change a number, value, sign, unit, or measurement.\n"
+        "- NEVER add or remove a negation or scope word (not, no, only, all, more, less).\n"
+        "- NEVER insert a claim or hedge ('significant'), drop a content word, or PARAPHRASE / "
+        "swap a content word (readability adds only function words/punctuation).\n"
+        "- a SUSPECTED number/sign/unit or factual error -> put it in 'issues' as "
+        "'suspected_data_error'; do not edit it.\n"
+        "Make the MINIMAL edit: `replace` = `find` with ONLY the one flagged problem fixed, every "
+        "other character kept.\n\n"
+        "'find' MUST be an exact substring of the script - copy a few words verbatim WITH enough "
+        "surrounding context to be unambiguous, short and localized.\n\n"
+        + _RETURN_JSON
+        + "\n\n=== SCRIPT ===\n"
         f"{script}\n"
     )
 
@@ -282,7 +243,7 @@ def render_script_repair_report(
     def cell(value: str) -> str:
         return value.replace("|", "\\|").replace("\n", " ")
 
-    lines = ["# Script repair report (guarded auto-fix)", ""]
+    lines = ["# Script repair report (notation vocalization)", ""]
     if plan.summary.strip():
         lines += [plan.summary.strip(), ""]
     lines += [f"## Applied repairs ({len(applied)})", ""]
@@ -294,14 +255,14 @@ def render_script_repair_report(
         ]
     else:
         lines.append("None.")
-    lines += ["", f"## Rejected ({len(rejected)}) - NOT applied (guard or not found)", ""]
+    lines += ["", f"## Not applied ({len(rejected)}) - could not be located in the script", ""]
     if rejected:
         lines += ["| find | proposed replace | why |", "|---|---|---|"]
         lines += [f"| {cell(r.find)} | {cell(r.replace)} | {cell(r.why)} |" for r in rejected]
     else:
         lines.append("None.")
     if plan.issues:
-        lines += ["", "## Flagged for human review (not auto-fixable)", ""]
+        lines += ["", "## Flagged by the model (not edited)", ""]
         lines += [
             f"- **{cell(i.severity)}/{cell(i.kind)}** {cell(i.location)}: {cell(i.detail)}"
             for i in plan.issues

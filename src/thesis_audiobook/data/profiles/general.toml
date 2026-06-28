@@ -1,7 +1,6 @@
 # General profile: a leaner listen for a non-specialist audience.
 name = "general"
 equation_tier = "announce"       # announce equations, no LLM gloss
-citation_policy = "drop"         # omit citation markers entirely
 table_handling = "skip"          # skip tables with a one-line note
 include_appendices = false
 voice_id = "mock-voice"          # set a real ElevenLabs voice id (or pass --voice)

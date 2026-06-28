@@ -10,8 +10,7 @@ Operates on the raw Document emitted by a parser adapter:
     fragments back into their heading; tag the References region as backmatter;
   - emit Gate A LowConfidence warnings for the judgment calls it makes.
 
-The GROBID citation map is merged in the ingest stage (which holds both port
-outputs). Running build_ir on already-clean IR (the mock fixture) is a no-op.
+Running build_ir on already-clean IR (the mock fixture) is a no-op.
 """
 
 from __future__ import annotations

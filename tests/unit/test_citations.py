@@ -1,67 +1,73 @@
 from __future__ import annotations
 
-from thesis_audiobook.ir import BibEntry, Citation
-from thesis_audiobook.stages.citations import (
-    expand_et_al,
-    resolve_citations,
-    spoken_citation,
-)
+from pathlib import Path
 
-_CITATIONS = {
-    "1": Citation(marker="1", bib_key="smith"),
-    "2": Citation(marker="2", bib_key="jones"),
-    "3": Citation(marker="3", bib_key="lee"),
-}
-_BIB = {
-    "smith": BibEntry(key="smith", authors=["Smith", "Roe"], year=2019),
-    "jones": BibEntry(key="jones", authors=["Jones"], year=2020),
-    "lee": BibEntry(key="lee", authors=["Lee", "Park", "Kim"], year=2021),
-}
+from thesis_audiobook.bootstrap import build_mock_context
+from thesis_audiobook.config import Config
+from thesis_audiobook.ir import Block, BlockType, Document, DocumentMeta, Handling
+from thesis_audiobook.stages.citations import CitationsStage
 
 
-def test_brief_two_authors() -> None:
-    assert spoken_citation(_BIB["smith"], "brief") == "Smith and Roe twenty nineteen"
+class _FakeLlm:
+    """Returns a fixed genericization map for the genericize prompt; counts calls."""
+
+    def __init__(self, mapping_json: str) -> None:
+        self.mapping_json = mapping_json
+        self.calls = 0
+
+    def complete(self, prompt: str, *, system: str | None = None, max_tokens: int | None = None):
+        self.calls += 1
+        return self.mapping_json
 
 
-def test_brief_three_or_more_authors_says_and_others() -> None:
-    assert spoken_citation(_BIB["lee"], "brief") == "Lee and others twenty twenty-one"
+def _doc(*texts: str) -> Document:
+    blocks = [
+        Block(id=f"b{i}", type=BlockType.paragraph, text=t, keep=True, handling=Handling.speak)
+        for i, t in enumerate(texts)
+    ]
+    return Document(meta=DocumentMeta(title="t"), blocks=blocks)
 
 
-def test_brief_single_author() -> None:
-    assert spoken_citation(_BIB["jones"], "brief") == "Jones twenty twenty"
+def test_strips_markers_offline(tiny_ir_path: Path) -> None:
+    # offline (mock LLM) -> no genericizing, but markers are still stripped deterministically
+    ctx = build_mock_context(Config(), pdf_bytes=b"x", mock_ir=tiny_ir_path)
+    doc = _doc("the response (Geiger et al., 2009) was rapid.41 and shown in [12]")
+    CitationsStage().run(doc, ctx)
+    assert doc.blocks[0].spoken == "the response was rapid. and shown in"
 
 
-def test_full_lists_all_authors() -> None:
-    assert spoken_citation(_BIB["lee"], "full") == "Lee, Park, Kim twenty twenty-one"
+def test_genericizes_narrative_mentions_with_llm(tiny_ir_path: Path) -> None:
+    ctx = build_mock_context(Config(), pdf_bytes=b"x", mock_ir=tiny_ir_path)
+    ctx.llm = _FakeLlm('{"Chalmer et al.": "researchers"}')
+    doc = _doc("Chalmer et al. note that water deficit helps.18")
+    CitationsStage().run(doc, ctx)
+    assert doc.blocks[0].spoken == "researchers note that water deficit helps."
 
 
-def test_resolve_brief_inline() -> None:
-    assert (
-        resolve_citations("we found x [1].", _CITATIONS, _BIB, "brief")
-        == "we found x Smith and Roe twenty nineteen."
-    )
+def test_genericize_is_cached(tiny_ir_path: Path) -> None:
+    ctx = build_mock_context(Config(), pdf_bytes=b"x", mock_ir=tiny_ir_path)
+    fake = _FakeLlm('{"Chalmer et al.": "researchers"}')
+    ctx.llm = fake
+    CitationsStage().run(_doc("Chalmer et al. note this"), ctx)
+    CitationsStage().run(_doc("Chalmer et al. note this"), ctx)  # same mentions -> cache hit
+    assert fake.calls == 1
 
 
-def test_resolve_drop_removes_marker() -> None:
-    assert resolve_citations("we found x [1].", _CITATIONS, _BIB, "drop") == "we found x."
+def test_no_llm_call_when_no_narrative_mentions(tiny_ir_path: Path) -> None:
+    ctx = build_mock_context(Config(), pdf_bytes=b"x", mock_ir=tiny_ir_path)
+    fake = _FakeLlm("{}")
+    ctx.llm = fake
+    doc = _doc("a plain sentence with a bracket [12] only")
+    CitationsStage().run(doc, ctx)
+    assert fake.calls == 0  # nothing narrative -> no model call
+    assert doc.blocks[0].spoken == "a plain sentence with a bracket only"
 
 
-def test_resolve_group() -> None:
-    assert (
-        resolve_citations("see [2, 3].", _CITATIONS, _BIB, "brief")
-        == "see Jones twenty twenty; Lee and others twenty twenty-one."
-    )
-
-
-def test_unknown_marker_is_dropped() -> None:
-    assert resolve_citations("x [99].", {}, {}, "brief") == "x."
-
-
-def test_marker_with_unlinked_bibentry_is_dropped() -> None:
-    # Marker resolves to a bib_key, but that key is absent from the bibliography.
-    citations = {"1": Citation(marker="1", bib_key="ghost")}
-    assert resolve_citations("x [1].", citations, {}, "brief") == "x."
-
-
-def test_expand_et_al() -> None:
-    assert expand_et_al("Bacheva et al. showed") == "Bacheva and others showed"
+def test_curate_disabled_skips_llm_but_still_strips(tiny_ir_path: Path) -> None:
+    ctx = build_mock_context(Config(curate=False), pdf_bytes=b"x", mock_ir=tiny_ir_path)
+    fake = _FakeLlm('{"Chalmer et al.": "researchers"}')
+    ctx.llm = fake
+    doc = _doc("Chalmer et al. note that.18")
+    CitationsStage().run(doc, ctx)
+    assert fake.calls == 0
+    assert doc.blocks[0].spoken == "Chalmer and others note that."  # degrades, not genericized

@@ -16,11 +16,11 @@ from thesis_audiobook.ir import StructureMap
 from thesis_audiobook.lexicon import DEFAULT_LEXICON, Lexicon
 from thesis_audiobook.log import StructuredLogger
 from thesis_audiobook.ports.audio import AudioMuxer, NamedBlob
-from thesis_audiobook.ports.bib import BibParser
 from thesis_audiobook.ports.cache import Cache
 from thesis_audiobook.ports.llm import LlmClient
 from thesis_audiobook.ports.parser import PdfParser
 from thesis_audiobook.ports.pronunciation import PronunciationPublisher
+from thesis_audiobook.ports.reporter import StatusReporter
 from thesis_audiobook.ports.tts import TtsClient
 from thesis_audiobook.pronunciation import DictionaryLocator, PronunciationLexicon
 from thesis_audiobook.provenance import ProvenanceMap
@@ -31,6 +31,10 @@ from thesis_audiobook.warnings import WarningsSink
 
 
 def _new_byte_map() -> dict[str, bytes]:
+    return {}
+
+
+def _new_str_map() -> dict[str, str]:
     return {}
 
 
@@ -62,18 +66,27 @@ def _new_reclass() -> list[Reclassification]:
     return []
 
 
+def _noop_reporter() -> StatusReporter:
+    # Local import keeps context.py free of adapter imports; the default is silent.
+    from thesis_audiobook.adapters.status import NoopReporter
+
+    return NoopReporter()
+
+
 @dataclass
 class Context:
     config: Config
     parser: PdfParser
-    bib: BibParser
     llm: LlmClient
+    verifier_llm: LlmClient
     tts: TtsClient
     cache: Cache
     muxer: AudioMuxer
     pronunciation: PronunciationPublisher
     log: StructuredLogger
     warnings: WarningsSink
+    # Ephemeral terminal progress; the no-op default keeps tests/dry-run silent.
+    status: StatusReporter = field(default_factory=_noop_reporter)
     lexicon: Lexicon = field(default_factory=_default_lexicon)
     pronunciation_lexicon: PronunciationLexicon = field(default_factory=_empty_pronunciation)
     # Run-scoped state.
@@ -81,6 +94,7 @@ class Context:
     cover_image: bytes | None = None
     structure_map: StructureMap | None = None
     reclassifications: list[Reclassification] = field(default_factory=_new_reclass)
+    citation_genericizations: dict[str, str] = field(default_factory=_new_str_map)
     script_qc_report: ScriptQcReport | None = None
     script_repair_plan: ScriptRepairPlan | None = None
     script_repair_applied: list[AppliedRepair] = field(default_factory=_new_applied)

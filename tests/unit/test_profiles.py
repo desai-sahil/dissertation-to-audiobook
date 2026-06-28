@@ -20,4 +20,4 @@ def test_unknown_profile_falls_back_to_code_default() -> None:
 
 def test_profile_for_loads_from_toml() -> None:
     assert profile_for("general").equation_tier == "announce"
-    assert profile_for("committee").citation_policy == "brief"
+    assert profile_for("committee").table_handling == "summarize"

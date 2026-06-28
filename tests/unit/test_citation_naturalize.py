@@ -1,114 +1,139 @@
 from __future__ import annotations
 
-from pathlib import Path
+import pytest
 
-from thesis_audiobook.bootstrap import build_mock_context
-from thesis_audiobook.citation_naturalize import parse_naturalization, render_citation
-from thesis_audiobook.config import Config
-from thesis_audiobook.ir import BibEntry, Block, BlockType, Citation, Document, DocumentMeta
-from thesis_audiobook.stages.citations import CitationsStage
-
-
-class FakeCiteLlm:
-    def __init__(self, json_out: str) -> None:
-        self.json_out = json_out
-        self.calls = 0
-
-    def complete(
-        self, prompt: str, *, system: str | None = None, max_tokens: int | None = None
-    ) -> str:
-        self.calls += 1
-        return self.json_out
+from thesis_audiobook.citation_naturalize import (
+    GENERIC_PHRASES,
+    apply_genericization,
+    build_genericize_prompt,
+    capitalized_citation_strips,
+    find_narrative_mentions,
+    naturalize_citations,
+    parse_genericization,
+    strip_markers,
+)
 
 
-def test_parse_naturalization_handles_fenced_and_garbage() -> None:
-    assert parse_naturalization('```json\n{"b1":{"5":"as_shown_by"}}\n```') == {
-        "b1": {"5": "as_shown_by"}
-    }
-    assert parse_naturalization("a mock gloss for input abcd") == {}  # offline mock -> empty
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("as shown in [12] and [3, 4] here", "as shown in and here"),  # bracketed dropped
+        ("the dynamics.41 of uptake", "the dynamics. of uptake"),  # bare fused number dropped
+        ("metastable state.18, 19 occurs", "metastable state. occurs"),
+        ("susceptibility to diseases.10–16 here", "susceptibility to diseases. here"),  # range
+        # a capital word fused to a COMMA list is a citation -> stripped
+        ("from the Stroock Group.20, 21 we", "from the Stroock Group. we"),
+        ("metastable State.18, 19 here", "metastable State. here"),
+        # a capital word fused to a SINGLE number is ambiguous (code/cultivar/part) -> left intact
+        ("rootstock Bud.118 was grafted", "rootstock Bud.118 was grafted"),
+        ("pump KNF.300 ran", "pump KNF.300 ran"),
+        ("see Group.20 alone", "see Group.20 alone"),
+        # SAFETY (review-found): a capital word fused to a dash RANGE is a code/catalog/cross, KEPT
+        ("antibody Lot.118-22 was", "antibody Lot.118-22 was"),
+        ("reagents Cat.13-45 from", "reagents Cat.13-45 from"),
+        ("the cross Bud.118-490 here", "the cross Bud.118-490 here"),
+        # a LOWERCASE content word is still stripped for any number form (single, comma, dash)
+        ("diseases.10-16 here", "diseases. here"),
+        # a COMMA-fused citation list (no space after the comma) is stripped, comma dropped
+        ("the Stroock group,20, 21 for", "the Stroock group for"),
+        ("the micro-tensiometer,20, 21 here", "the micro-tensiometer here"),
+        # SAFETY: real "word, NUMBER" (space after comma) and a single fused cross-ref are kept
+        ("we measured group, 20 samples", "we measured group, 20 samples"),
+        ("see Table,2 here", "see Table,2 here"),
+        # a part number / alphanumeric code is NOT a citation and must be left intact
+        ("the spring (Part No.9657K286) was", "the spring (Part No.9657K286) was"),
+        (
+            "we refer to Pagay et al.,21 and Black et al.,20",
+            "we refer to Pagay et al. and Black et al.",
+        ),
+        ("driven by ABA (Geiger et al., 2009; Brandt et al., 2012).", "driven by ABA."),
+        # SAFETY: a real decimal and a real sentence-then-number must be untouched
+        ("a value of 0.4 MPa", "a value of 0.4 MPa"),
+        ("growth. 41 plants were grown", "growth. 41 plants were grown"),
+        # SAFETY (review-found, high): initials / abbreviations / labels keep their number
+        ("were on M.26 semi-dwarfing rootstock", "were on M.26 semi-dwarfing rootstock"),
+        ("nighttime irrigation No.1 as seen", "nighttime irrigation No.1 as seen"),
+        ("see Fig.3 for details", "see Fig.3 for details"),
+        ("shown in Figure E.11, E.12 with", "shown in Figure E.11, E.12 with"),
+        ("the spring (Part No.9657K286) was", "the spring (Part No.9657K286) was"),
+        # SAFETY (review-found, high): a parenthetical that is a date/value, not a citation, is kept
+        ("used in Summer 2020 here", "used in Summer 2020 here"),
+        ("the cells (n = 2020) were counted", "the cells (n = 2020) were counted"),
+        (
+            "measured (20 July 2018, 1500-1700 hrs) at the farm",
+            "measured (20 July 2018, 1500-1700 hrs) at the farm",
+        ),
+        # but a real author-year parenthetical IS dropped
+        ("driven by ABA (Buckley and Mott, 2013) here", "driven by ABA here"),
+    ],
+)
+def test_strip_markers(text: str, expected: str) -> None:
+    assert strip_markers(text) == expected
 
 
-def test_render_citation_is_bounded() -> None:
+def test_capitalized_citation_strips_surfaces_only_comma_lists() -> None:
+    # the stage warns on these (a comma list after a capital word is usually a citation, but could
+    # be a code series like "Bud.9, 62, 118"); dash ranges and single numbers are not flagged
+    spans = capitalized_citation_strips("Stroock Group.20, 21 and Bud.118-490 and Bud.9, 62, 118")
+    assert spans == ["Group.20, 21", "Bud.9, 62, 118"]
+    assert capitalized_citation_strips("Bud.118 and Cat.13-45 and dynamics.41, 42") == []
+    # a capital comma-fused cross-ref list is surfaced too; a lowercase citation is not warned
+    assert capitalized_citation_strips("see Table,2, 3 but group,20, 21") == ["Table,2, 3"]
+
+
+def test_find_narrative_mentions_only_et_al() -> None:
+    # anchored on "et al." (the source form); a bare "X and others" common-noun phrase is NOT a
+    # mention (avoids genericizing "Apples and others were tested").
+    text = "Chalmer et al. note that, while Apples and others were tested, as do Chalmer et al."
+    assert find_narrative_mentions(text) == ["Chalmer et al."]  # deduped, no false positive
+
+
+def test_dangling_lead_in_is_removed_after_stripping() -> None:
+    assert strip_markers("the effect was clear as shown in [12].") == "the effect was clear."
+    # a real "according to X" with content after it is untouched (only orphaned lead-ins go)
+    assert strip_markers("according to the data, X held") == "according to the data, X held"
+
+
+def test_parse_genericization_only_allows_fixed_phrases() -> None:
+    raw = '{"Chalmer et al.": "researchers", "Smith et al.": "according to my own analysis"}'
+    out = parse_genericization(raw)
+    assert out == {"Chalmer et al.": "researchers"}  # free-text phrase rejected
+    assert all(v in GENERIC_PHRASES for v in out.values())
+    assert parse_genericization("not json") == {}  # offline mock -> no genericizing
+
+
+def test_apply_genericization_whole_span() -> None:
+    text = "Chalmer et al. note that water deficit helps"
+    out = apply_genericization(text, {"Chalmer et al.": "researchers"})
+    assert out == "researchers note that water deficit helps"
+
+
+def test_naturalize_offline_degrades_to_and_others() -> None:
+    # no mapping (offline) -> markers stripped, narrative mention reads naturally
+    assert naturalize_citations("Chalmer et al. note that.41 here") == (
+        "Chalmer and others note that. here"
+    )
+
+
+def test_naturalize_with_mapping_genericizes() -> None:
+    out = naturalize_citations("Chalmer et al. note that X", {"Chalmer et al.": "researchers"})
+    assert out == "researchers note that X"
+
+
+def test_citation_list_collapses_to_one_phrase() -> None:
+    # a list of genericized citations runs together; collapse to a single "several studies"
+    out = naturalize_citations(
+        "we refer to Pagay et al.,21 Black et al.,20 and Zhu.",
+        {"Pagay et al.": "prior studies", "Black et al.": "several studies"},
+    )
+    assert out == "we refer to several studies"
+    # a single genericized mention is NOT collapsed, and a following sentence subject is safe
     assert (
-        render_citation("as_shown_by", "Jain", "twenty twenty-one")
-        == "as shown by Jain in twenty twenty-one"
-    )
-    assert (
-        render_citation("narrative", "Jain and Smith", "twenty ten")
-        == "Jain and Smith, in twenty ten,"
-    )
-    # An unknown "style" (e.g. an injected sentence) or a missing field renders nothing.
-    assert render_citation("which was fabricated", "Jain", "twenty twenty-one") is None
-    assert render_citation("as_shown_by", "", "twenty twenty-one") is None
-    assert render_citation("as_shown_by", "Jain", "") is None
-
-
-def _doc(
-    *,
-    authors: list[str] | None = None,
-    year: int | None = 2021,
-    text: str = "This was demonstrated [5].",
-) -> Document:
-    return Document(
-        meta=DocumentMeta(title="t"),
-        blocks=[Block(id="b1", type=BlockType.paragraph, text=text)],
-        citations={"5": Citation(marker="[5]", bib_key="k")},
-        bibliography={
-            "k": BibEntry(key="k", authors=["Jain"] if authors is None else authors, year=year)
-        },
+        naturalize_citations("researchers, Stomata regulate transpiration.", {"X et al.": "x"})
+        == "researchers, Stomata regulate transpiration."
     )
 
 
-def _run(doc: Document, json_out: str, tiny_ir_path: Path) -> str:
-    ctx = build_mock_context(Config(), pdf_bytes=b"x", mock_ir=tiny_ir_path)
-    ctx.llm = FakeCiteLlm(json_out)
-    CitationsStage().run(doc, ctx)
-    return doc.blocks[0].spoken or ""
-
-
-def test_naturalizer_renders_chosen_style_and_caches(tiny_ir_path: Path) -> None:
-    ctx = build_mock_context(Config(), pdf_bytes=b"x", mock_ir=tiny_ir_path)
-    llm = FakeCiteLlm('{"b1": {"5": "as_shown_by"}}')
-    ctx.llm = llm
-    doc = _doc()
-    CitationsStage().run(doc, ctx)
-    assert doc.blocks[0].spoken == "This was demonstrated as shown by Jain in twenty twenty-one."
-    assert llm.calls == 1
-    CitationsStage().run(_doc(), ctx)  # fresh identical doc -> cache hit
-    assert llm.calls == 1
-
-
-def test_naturalizer_cannot_inject_text(tiny_ir_path: Path) -> None:
-    # A bogus "style" that is actually a sentence injects nothing: only known styles render.
-    spoken = _run(_doc(), '{"b1": {"5": "which was completely fabricated"}}', tiny_ir_path)
-    assert "fabricated" not in spoken
-    assert "Jain twenty twenty-one" in spoken  # deterministic fallback
-
-
-def test_naturalizer_skips_entry_with_no_author_or_year(tiny_ir_path: Path) -> None:
-    spoken = _run(
-        _doc(authors=[], year=None, text="The result holds [5]."),
-        '{"b1": {"5": "as_shown_by"}}',
-        tiny_ir_path,
-    )
-    assert "The result holds" in spoken
-    assert "as shown" not in spoken  # not naturalized; empty citation contributes nothing
-
-
-def test_naturalizer_inline_author_reads_year_only(tiny_ir_path: Path) -> None:
-    # The model picks a name-bearing style, but the author is named inline, so we force
-    # year-only and the name is not doubled.
-    spoken = _run(
-        _doc(text="Jain et al. [5] showed the effect."),
-        '{"b1": {"5": "as_shown_by"}}',
-        tiny_ir_path,
-    )
-    assert spoken.count("Jain") == 1
-    assert "in twenty twenty-one" in spoken
-
-
-def test_naturalizer_is_noop_under_mock_llm(tiny_ir_path: Path) -> None:
-    ctx = build_mock_context(Config(), pdf_bytes=b"x", mock_ir=tiny_ir_path)  # MockLlm
-    doc = _doc()
-    CitationsStage().run(doc, ctx)
-    assert "Jain twenty twenty-one" in (doc.blocks[0].spoken or "")
+def test_prompt_lists_only_allowed_phrases() -> None:
+    prompt = build_genericize_prompt(["Chalmer et al."])
+    assert "Chalmer et al." in prompt and "researchers" in prompt

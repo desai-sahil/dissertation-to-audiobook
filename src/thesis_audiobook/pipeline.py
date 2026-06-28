@@ -39,6 +39,7 @@ class Pipeline:
         to: str | None = None,
     ) -> Document:
         for stage in self._slice(frm, to):
+            ctx.status.update(stage.name)  # coarse per-stage label; loops refine it inside run()
             doc = stage.run(doc, ctx)
             # Boundary validation: a malformed transform raises here, not downstream.
             doc = Document.model_validate(doc.model_dump())

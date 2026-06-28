@@ -7,7 +7,6 @@ import pytest
 
 from thesis_audiobook.adapters.poppler_parser import (
     PopplerParser,
-    parse_bibliography,
     parse_document,
 )
 from thesis_audiobook.ir import BlockType
@@ -26,13 +25,6 @@ def test_parse_document_recovers_sections_in_order(cassette_dir: Path) -> None:
 def test_parse_document_finds_references(cassette_dir: Path) -> None:
     doc = parse_document(_cassette(cassette_dir))
     assert any(b.type is BlockType.reference_list for b in doc.blocks)
-
-
-def test_parse_bibliography_links_all_markers(cassette_dir: Path) -> None:
-    result = parse_bibliography(_cassette(cassette_dir))
-    assert len(result.bibliography) == 35
-    assert sorted(result.citations, key=int) == [str(n) for n in range(1, 36)]
-    assert result.bibliography["ref1"].year is not None
 
 
 @pytest.mark.skipif(shutil.which("pdftotext") is None, reason="poppler not installed")

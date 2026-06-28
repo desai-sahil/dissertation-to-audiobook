@@ -18,7 +18,7 @@ from typing import Literal
 
 from thesis_audiobook.ir import StrictModel
 
-LexCategory = Literal["symbol", "gene", "acronym", "greek", "unit"]
+LexCategory = Literal["symbol", "gene", "acronym", "greek", "unit", "errata"]
 
 
 class LexEntry(StrictModel):
@@ -39,7 +39,7 @@ class Lexicon(StrictModel):
 
     def alias_entries(self) -> list[LexEntry]:
         """All expandable categories, longest grapheme first (global longest match)."""
-        alias = self.by_category("symbol", "gene", "acronym", "greek")
+        alias = self.by_category("symbol", "gene", "acronym", "greek", "errata")
         return sorted(alias, key=lambda entry: len(entry.grapheme), reverse=True)
 
 
@@ -123,6 +123,10 @@ _ENTRIES: list[LexEntry] = [
     _e("HP–HA", "hydropassive hydroactive", "acronym"),
     _e("PP2C", "P P two C", "acronym"),
     _e("PYR", "P Y R", "acronym"),
+    # Errata: unambiguous source misspellings of common words, corrected so they are not read
+    # aloud wrong. Only scale-words and the like, where the correction changes no number/name/claim.
+    _e("billons", "billion", "errata", case_sensitive=False),
+    _e("millons", "million", "errata", case_sensitive=False),
 ]
 
 DEFAULT_LEXICON = Lexicon(version="plant-physiology-v0", entries=_ENTRIES)

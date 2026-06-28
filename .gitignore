@@ -30,3 +30,6 @@ sample/*.full.pdf
 
 # Local tooling
 .claude/
+
+# Stray local exports (NotebookLM/browser downloads), not project source
+Thesis Audiobook*.html

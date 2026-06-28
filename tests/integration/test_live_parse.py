@@ -6,22 +6,13 @@ import pytest
 
 
 @pytest.mark.live
-def test_live_marker_and_grobid(sample_pdf: Path) -> None:
-    """Runs the real Marker parser and GROBID on the sample. Needs both installed.
+def test_live_marker_parse(sample_pdf: Path) -> None:
+    """Runs the real Marker parser on the sample. Needs marker-pdf installed.
 
-    Skipped by default; run with `pytest -m live` on a machine with marker-pdf and a
-    GROBID service (default http://localhost:8070).
+    Skipped by default; run with `pytest -m live` on a machine with marker-pdf. Citations are
+    genericized downstream with no bibliography, so there is no separate bib/GROBID step.
     """
-    from thesis_audiobook.adapters.grobid_client import GrobidClient
     from thesis_audiobook.adapters.marker_parser import MarkerParser
 
-    pdf = sample_pdf.read_bytes()
-
-    document = MarkerParser().parse(pdf)
+    document = MarkerParser().parse(sample_pdf.read_bytes())
     assert len(document.blocks) > 0
-
-    client = GrobidClient()
-    if not client.is_alive():
-        pytest.skip("GROBID service is not running")
-    result = client.parse(pdf)
-    assert len(result.bibliography) > 0

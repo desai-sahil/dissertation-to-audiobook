@@ -1,10 +1,9 @@
 """Pure-Python PDF parser built on poppler's pdftotext. Runs offline, no ML, no network.
 
 This is the hybrid-plan fallback that lets the whole pipeline run and be tested
-without Marker/MinerU/GROBID. It implements the PdfParser and BibParser ports. The
-pdftotext subprocess is the only I/O; the text-to-IR parsing is split into pure
-module functions (parse_document, parse_bibliography) so they can be contract-tested
-offline against a recorded pdftotext cassette.
+without Marker/MinerU. It implements the PdfParser port. The pdftotext subprocess is
+the only I/O; the text-to-IR parsing is the pure module function parse_document, which
+is contract-tested offline against a recorded pdftotext cassette.
 """
 
 from __future__ import annotations
@@ -15,16 +14,13 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from thesis_audiobook.ir import BibEntry, Block, BlockType, Citation, Document, DocumentMeta
-from thesis_audiobook.ports.bib import BibResult
+from thesis_audiobook.ir import Block, BlockType, Document, DocumentMeta
 
 _CHAPTER = re.compile(r"^CHAPTER\s+(\d+)$", re.IGNORECASE)
 _SECTION_NUM = re.compile(r"^(\d+(?:\.\d+)+)$")
 _SECTION_INLINE = re.compile(r"^(\d+(?:\.\d+)+)\s+(\S.*)$")
 _PAGE_NUM = re.compile(r"^\d{1,4}$")
 _REF_START = re.compile(r"^\[(\d+)\]\s+(.*)$")
-_YEAR = re.compile(r"\b(?:19|20)\d{2}\b")
-_REFS_HEADING = re.compile(r"^(references|bibliography)$", re.IGNORECASE)
 
 
 class PopplerUnavailableError(RuntimeError):
@@ -140,64 +136,8 @@ def parse_document(text: str, *, title: str | None = None) -> Document:
     )
 
 
-def _split_references(text: str) -> list[tuple[str, str]]:
-    matches = list(re.finditer(r"\[(\d+)\]", text))
-    pairs: list[tuple[str, str]] = []
-    for position, match in enumerate(matches):
-        start = match.end()
-        end = matches[position + 1].start() if position + 1 < len(matches) else len(text)
-        body = re.sub(r"\s+", " ", text[start:end]).strip()
-        pairs.append((match.group(1), body))
-    return pairs
-
-
-def _parse_reference(body: str) -> tuple[list[str], int | None]:
-    # The publication year is typically the last year in the entry (a leading year is
-    # often a conference date inside the title, or a volume label).
-    years = _YEAR.findall(body)
-    year = int(years[-1]) if years else None
-    author_part = re.split(r"[“\"]", body, maxsplit=1)[0]
-    et_al = "et al" in author_part.lower()
-    author_part = re.sub(r"\bet al\.?", "", author_part, flags=re.IGNORECASE)
-    surnames: list[str] = []
-    for piece in re.split(r",| and ", author_part):
-        words = piece.strip().rstrip(".").split()
-        if words:
-            surnames.append(words[-1])
-    if et_al and len(surnames) == 1:
-        surnames.append("others")
-    return surnames, year
-
-
-def _references_region(text: str) -> str:
-    lines = text.split("\n")
-    for index, line in enumerate(lines):
-        if _REFS_HEADING.match(line.strip()) or _REF_START.match(line.strip()):
-            return "\n".join(lines[index:])
-    return ""
-
-
-def parse_bibliography(text: str) -> BibResult:
-    """Pure: parse the references region into a bibliography + numeric citation map."""
-    bibliography: dict[str, BibEntry] = {}
-    citations: dict[str, Citation] = {}
-    for marker, body in _split_references(_references_region(text)):
-        authors, year = _parse_reference(body)
-        key = f"ref{marker}"
-        bibliography[key] = BibEntry(key=key, authors=authors, year=year, title=body[:200] or None)
-        citations[marker] = Citation(marker=marker, bib_key=key)
-    return BibResult(bibliography=bibliography, citations=citations)
-
-
 class PopplerParser:
     """PdfParser via pdftotext reflow."""
 
     def parse(self, pdf_bytes: bytes) -> Document:
         return parse_document(pdftotext(pdf_bytes))
-
-
-class PopplerBibParser:
-    """BibParser fallback: parse the references section and link numeric markers."""
-
-    def parse(self, pdf_bytes: bytes) -> BibResult:
-        return parse_bibliography(pdftotext(pdf_bytes))

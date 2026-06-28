@@ -13,6 +13,20 @@ def test_split_display_math_extracts_inner_latex() -> None:
     assert split_display_math(r"text with $inline$ math") is None
 
 
+def test_split_display_math_folds_trailing_number_on_its_own_line() -> None:
+    # Marker renders a numbered display equation as `$$...$$` then `(X.Y)` on the next line;
+    # the number is folded into a \tag so the math stage can announce it.
+    assert split_display_math("$$VPD = \\frac{P_{sat}(T)}{100\\%}$$\n (1.4)") == (
+        r"VPD = \frac{P_{sat}(T)}{100\%} \tag{1.4}"
+    )
+    # also when the number sits right after the closing $$ on the same line
+    assert split_display_math(r"$$e_f = \sqrt{x}$$ (2.5)") == r"e_f = \sqrt{x} \tag{2.5}"
+    # an unnumbered display equation (an intermediate step) returns its body, no tag
+    assert split_display_math(r"$$a = b + c$$") == "a = b + c"
+    # a bare parenthetical that is not an equation number (no decimal) is not folded
+    assert split_display_math(r"$$a = b$$ (note)") is None
+
+
 def test_clean_markup_noop_on_plain_prose() -> None:
     plain = "The stomata regulate transpiration under drought stress."
     assert clean_markup(plain) == plain
@@ -53,6 +67,43 @@ def test_clean_markup_number_superscripts_are_kept() -> None:
     assert clean_markup("10<sup>2</sup> to 10<sup>6</sup>") == (
         "10 to the power of 2 to 10 to the power of 6"
     )
+
+
+def test_clean_markup_drops_sentence_end_citation_superscript() -> None:
+    # A superscript AFTER a sentence period is a citation marker, not a decimal: drop the number
+    # (QC found "xylem.<sup>31</sup>" was becoming "xylem.thirty-one"). A digit before the period
+    # still marks a Marker-split decimal and is kept.
+    assert clean_markup("through the xylem.<sup>31</sup> When subjected") == (
+        "through the xylem. When subjected"
+    )
+    assert clean_markup("boiling.<sup>31, 32</sup> The principle") == "boiling. The principle"
+    assert clean_markup("constant 8.<sup>314</sup> J") == "constant 8.314 J"  # decimal still kept
+
+
+def test_clean_markup_drops_clause_punctuation_citation_superscript() -> None:
+    # A numeric superscript after a clause-ending ')', ']', ':', ';', ',' (or a space-separated
+    # period) is a citation marker, not a value: drop it. QC found "(Ψs)48", "sand,33",
+    # "References. 17, 56", and "SPC).17" all leaking footnote numbers into the audio.
+    assert clean_markup("the term (Ψs)<sup>48</sup> governs") == "the term (Ψs) governs"
+    assert clean_markup("dry sand,<sup>33</sup> which holds") == "dry sand, which holds"
+    assert clean_markup("see References. <sup>17, 56</sup> for") == "see References. for"
+    # a period after a non-digit (here ")") ends a clause, so its superscript is a citation marker
+    assert clean_markup("the SPC).<sup>17</sup> system") == "the SPC). system"
+    # SAFETY: a standalone shredded-equation digit after an operator is a real value, kept
+    assert "= 0 Pa" in clean_markup("ψ <sup>=</sup> <sup>0</sup> Pa")
+
+
+def test_clean_markup_drops_reference_pointer_citation() -> None:
+    # "based on References <sup>N</sup>" / "according to Ref.<sup>N</sup>" is a citation pointer:
+    # the lead-in + the word + the superscript are machinery and read as nothing. Drop the whole
+    # span to a sentence period instead of leaking a dangling "based on References." (QC found it).
+    assert clean_markup("ranges based on References. <sup>17.56</sup> Importantly the") == (
+        "ranges. Importantly the"
+    )
+    assert clean_markup("the model (tuned based on References<sup>17,56</sup>) here") == (
+        "the model (tuned.) here"
+    )
+    assert clean_markup("value according to Ref.<sup>4</sup> rises") == "value. rises"
 
 
 def test_clean_markup_embedded_display_and_greek_spacing() -> None:

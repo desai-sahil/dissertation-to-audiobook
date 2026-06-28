@@ -13,7 +13,6 @@ from pathlib import Path
 from thesis_audiobook.audio import silent_wav, wav_duration
 from thesis_audiobook.ir import Document
 from thesis_audiobook.ports.audio import AudiobookPlan, ChunkTiming, MuxResult, NamedBlob
-from thesis_audiobook.ports.bib import BibResult
 from thesis_audiobook.ports.tts import TtsRequest
 from thesis_audiobook.pronunciation import (
     DictionaryLocator,
@@ -33,13 +32,6 @@ class MockParser:
 
     def parse(self, pdf_bytes: bytes) -> Document:
         return Document.model_validate_json(self._ir_path.read_text(encoding="utf-8"))
-
-
-class MockBibParser:
-    """Returns an empty bibliography. Real GROBID linkage lands in M2."""
-
-    def parse(self, pdf_bytes: bytes) -> BibResult:
-        return BibResult(bibliography={}, citations={})
 
 
 class MockLlm:

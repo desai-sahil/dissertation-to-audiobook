@@ -135,7 +135,12 @@ _MARKUP_TRIGGER = "$<\\*&¡¿" + "".join(_UNICODE_MATH)
 _EMPH = re.compile(r"\*\*(?P<b>.+?)\*\*|\*(?P<i>[^*\n]+?)\*", re.DOTALL)
 # A LaTeX environment wrapper (e.g. \begin{bmatrix} ... \end{bmatrix}); drop the markers.
 _ENV = re.compile(r"\\(?:begin|end)\{[^}]*\}")
-_DISPLAY_MATH = re.compile(r"^\$\$(?P<body>.+?)\$\$$", re.DOTALL)
+# A whole-chunk display equation. The number may be folded in (a \tag, or a "(X.Y)" before the
+# closing $$) or, as Marker often renders a numbered display equation, sit on its own line AFTER
+# the $$...$$ - captured here so the block is still recognized as an equation, not dropped to prose.
+_DISPLAY_MATH = re.compile(
+    r"^\$\$(?P<body>.+?)\$\$\s*(?:\(\s*(?P<num>[0-9]+(?:\.[0-9]+)+)\s*\))?\s*$", re.DOTALL
+)
 _DISPLAY_INLINE = re.compile(r"\$\$(?P<body>.+?)\$\$", re.DOTALL)
 _INLINE_MATH = re.compile(r"\$(?P<body>[^$]+?)\$")
 _TAG_DROP = re.compile(r"</?(?:b|i|em|strong|ol|ul|li|span)>", re.IGNORECASE)
@@ -143,6 +148,15 @@ _TAG_DROP = re.compile(r"</?(?:b|i|em|strong|ol|ul|li|span)>", re.IGNORECASE)
 # Marker-fragmented decimal like "8.<sup>314</sup>") is kept, while one after a word (a
 # citation marker) is dropped. Without this, "8.314" -> "8." and "10^5" -> "10".
 _SUP = re.compile(r"(?P<pre>[0-9.]?)<sup>(?P<body>.*?)</sup>", re.IGNORECASE | re.DOTALL)
+# A citation POINTER ("based on References <sup>17, 56</sup>", "according to Ref.<sup>4</sup>") is
+# machinery: the lead-in connective + the word "Reference(s)"/"Ref(s)" + the superscript all read
+# as nothing useful aloud, and dropping only the number leaves a dangling "based on References.".
+# Remove the whole span (down to a sentence period) BEFORE the generic sup handler runs.
+_REF_CITE = re.compile(
+    r"\s*(?:based\s+(?:on|upon)|according\s+to)\s+(?:references?|refs?)\b\.?\s*"
+    r"<sup>\s*[0-9.,\s]+\s*</sup>",
+    re.IGNORECASE,
+)
 # Chemical formulas Marker mis-typesets with a superscript where the digit is really a
 # subscript ("CO<sup>2</sup>" -> "CO squared"). Fix the few unambiguous gas-exchange molecules
 # before the generic superscript handler so they read as the formula (then the lexicon spells
@@ -178,9 +192,18 @@ _LEFTOVER_CMD = re.compile(r"\\([A-Za-z]+)")
 
 
 def split_display_math(text: str) -> str | None:
-    """If the whole chunk is a `$$...$$` display equation, return the inner LaTeX, else None."""
+    """If the whole chunk is a `$$...$$` display equation, return the inner LaTeX, else None.
+
+    A numbered equation whose number trails the closing `$$` on its own line (`$$...$$\\n (1.4)`,
+    a common Marker rendering) is captured too: the number is folded into the LaTeX as a `\\tag`
+    so the math stage announces it by number, instead of the block falling through to prose and
+    being read as flattened symbol-soup."""
     match = _DISPLAY_MATH.fullmatch(text.strip())
-    return match.group("body").strip() if match else None
+    if match is None:
+        return None
+    body = match.group("body").strip()
+    number = match.group("num")
+    return f"{body} \\tag{{{number}}}" if number else body
 
 
 def _script_repl(match: re.Match[str]) -> str:
@@ -223,6 +246,7 @@ def clean_markup(text: str) -> str:
     if not any(ch in text for ch in _MARKUP_TRIGGER):
         return text
     text = _BR.sub(" ", text)
+    text = _REF_CITE.sub(".", text)  # "based on References <sup>17,56</sup>" -> sentence period
     for chem, plain in _CHEM_SUP:
         text = chem.sub(plain, text)
     text = _SUP.sub(_script_repl_html, text)
@@ -253,8 +277,20 @@ def _script_repl_html(match: re.Match[str]) -> str:
     if pre and (pre == "." or pre.isdigit()):
         if not body:
             return pre
-        if pre == "." and body.isdigit():
-            return f"{pre}{body}"
+        if pre == ".":
+            before_text = match.string[: match.start()]
+            before = before_text[-1] if before_text else ""
+            # A numeric superscript after a period: a DIGIT before the period marks a Marker-split
+            # decimal ("8." + "314" -> "8.314"), kept. A shredded equation puts that digit in its
+            # own tag ("<sup>8</sup>.<sup>314</sup>"), so the raw char before the period is ">";
+            # treat a numeric trailing <sup> as a digit too. Anything else (a letter, ")", ...)
+            # means the period ends a word/clause and the superscript is a citation marker -> drop
+            # the number, keep the period ("xylem.31" / "SPC).17" / "boiling.31, 32" -> the period).
+            prev_is_digit = before.isdigit() or bool(
+                re.search(r"<sup>\s*[0-9.]+\s*</sup>$", before_text)
+            )
+            if body and all(c in "0123456789,. " for c in body):
+                return f"{pre}{body}" if prev_is_digit else pre
         if all(ch in "+-−.0123456789" for ch in body):
             signed = body.replace("−", " minus ").replace("+", " plus ")
             return f"{pre} to the power of {signed}"
@@ -263,19 +299,25 @@ def _script_repl_html(match: re.Match[str]) -> str:
         if body.lower() == "o" and match.string[match.end() : match.end() + 1] in ("C", "F"):
             return f"{pre} degrees "  # "40<sup>o</sup>C" -> degree, but not the O of a formula
         return f"{pre} {body}"
-    # pre is empty: classify by the (unconsumed) character before the tag.
-    before = match.string[match.start() - 1] if match.start() > 0 else ""
+    # pre is empty: classify by the character(s) before the tag.
+    before_text = match.string[: match.start()]
+    before = before_text[-1] if before_text else ""
     if not body:
         return ""
+    # A numeric superscript after a clause-ending '.', ')', ']', ':', ';', ',' (optionally a
+    # trailing space) is a citation marker -> drop it ("(psi s)<sup>48</sup>", "References.
+    # <sup>17.56</sup>", "sand,<sup>33</sup>").
+    stripped = before_text.rstrip()
+    if stripped and stripped[-1] in ".)]:;," and all(c in "0123456789,. " for c in body):
+        return ""
     if before.isalpha():
-        # Attached to a word: a unit exponent (m<sup>2</sup> -> "m squared") or, for a bare
-        # number, a footnote/citation marker to drop ("shown<sup>12</sup>" -> "shown").
+        # Attached to a word: a unit exponent (m<sup>2</sup> -> "m squared") or a footnote/citation
+        # number to drop ("shown<sup>12</sup>" -> "shown").
         if body == "2":
             return " squared"
         if body == "3":
             return " cubed"
-        return "" if body.isdigit() else f" {body}"
+        return "" if all(c in "0123456789, " for c in body) else f" {body}"
     # Standalone (space/operator/start before): Marker shredded an equation into per-character
-    # <sup> tags, so this digit/symbol is a real value - keep it. Dropping it as a citation
-    # marker silently garbled measurements ("8.314" -> ".314", "= 0 Pa" -> "= Pa").
+    # <sup> tags, so this digit/symbol is a real value - keep it ("= <sup>0</sup> Pa").
     return f" {body}"

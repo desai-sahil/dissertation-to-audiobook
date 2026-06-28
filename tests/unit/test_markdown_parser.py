@@ -8,7 +8,7 @@ from thesis_audiobook.adapters.markdown_parser import (
     MarkdownFileParser,
     MarkdownFileUnavailableError,
 )
-from thesis_audiobook.bootstrap import select_parser_adapters
+from thesis_audiobook.bootstrap import select_parser
 from thesis_audiobook.config import Config
 from thesis_audiobook.ir import BlockType
 
@@ -29,15 +29,13 @@ def test_markdown_file_parser_missing_file_raises(tmp_path: Path) -> None:
         MarkdownFileParser(tmp_path / "nope.md").parse(b"")
 
 
-def test_select_parser_adapters_markdown(tmp_path: Path) -> None:
+def test_select_parser_markdown(tmp_path: Path) -> None:
     md = tmp_path / "thesis.md"
     md.write_text(_MD, encoding="utf-8")
-    parser, bib = select_parser_adapters(Config(parser_backend="markdown", markdown_path=str(md)))
+    parser = select_parser(Config(parser_backend="markdown", markdown_path=str(md)))
     assert isinstance(parser, MarkdownFileParser)
-    # The markdown backend has no separate bibliography source (empty mock).
-    assert bib.parse(b"").bibliography == {}
 
 
-def test_select_parser_adapters_markdown_requires_path() -> None:
+def test_select_parser_markdown_requires_path() -> None:
     with pytest.raises(ValueError, match="markdown_path"):
-        select_parser_adapters(Config(parser_backend="markdown"))
+        select_parser(Config(parser_backend="markdown"))
