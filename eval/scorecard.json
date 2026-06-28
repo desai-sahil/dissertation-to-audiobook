@@ -1,0 +1,77 @@
+[
+  {
+    "thesis_id": "gao",
+    "dimensions": [
+      {
+        "dimension": "structure (chapters)",
+        "passed": 4,
+        "total": 4,
+        "rate": 1.0,
+        "misses": []
+      },
+      {
+        "dimension": "citation/markup strip",
+        "passed": 4,
+        "total": 4,
+        "rate": 1.0,
+        "misses": []
+      },
+      {
+        "dimension": "value preservation",
+        "passed": 4,
+        "total": 4,
+        "rate": 1.0,
+        "misses": []
+      },
+      {
+        "dimension": "raw-token leak (clean=1)",
+        "passed": 1,
+        "total": 1,
+        "rate": 1.0,
+        "misses": []
+      }
+    ]
+  },
+  {
+    "thesis_id": "zhu",
+    "dimensions": [
+      {
+        "dimension": "structure (chapters)",
+        "passed": 0,
+        "total": 6,
+        "rate": 0.0,
+        "misses": [
+          "detected 0/6 chapters"
+        ]
+      },
+      {
+        "dimension": "citation/markup strip",
+        "passed": 0,
+        "total": 4,
+        "rate": 0.0,
+        "misses": [
+          "span id",
+          "doi:",
+          "the link in the text",
+          "re:page-?\\w+ to (zero|one)"
+        ]
+      },
+      {
+        "dimension": "value preservation",
+        "passed": 2,
+        "total": 3,
+        "rate": 0.667,
+        "misses": [
+          "one point zero one"
+        ]
+      },
+      {
+        "dimension": "raw-token leak (clean=1)",
+        "passed": 1,
+        "total": 1,
+        "rate": 1.0,
+        "misses": []
+      }
+    ]
+  }
+]

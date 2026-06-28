@@ -39,17 +39,17 @@ packages = ["src/thesis_audiobook"]
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-src = ["src", "tests"]
+src = ["src", "tests", "eval"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
 
 [tool.pyright]
-include = ["src", "tests"]
-# Production code (src) is strict per the non-negotiables; tests are checked at
-# basic so pytest/hypothesis untyped decorators do not trip strict-only rules.
+include = ["src", "tests", "eval"]
+# Production code (src) and the eval harness are strict per the non-negotiables; tests are
+# checked at basic so pytest/hypothesis untyped decorators do not trip strict-only rules.
 typeCheckingMode = "basic"
-strict = ["src"]
+strict = ["src", "eval"]
 pythonVersion = "3.12"
 venvPath = "."
 venv = ".venv"
@@ -59,6 +59,9 @@ venv = ".venv"
 # network. Run them explicitly with `pytest -m live` (a CLI -m overrides this).
 addopts = "-q -m 'not live'"
 testpaths = ["tests"]
+# Put the repo root on sys.path so tests can import the top-level `eval` harness package
+# (the installed package is `thesis_audiobook`; `eval` lives at the root, not under src).
+pythonpath = ["."]
 markers = [
     "live: tests that hit real external services (not run by default; select with -m live)",
     "contract: offline contract tests that inject a fake SDK client (no real call; guard skipped)",

@@ -1,0 +1,24 @@
+{
+  "thesis_id": "gao",
+  "title": "Study of in-plant sensing for the precise control of water use in agriculture",
+  "fields": ["plant physiology", "MEMS sensors"],
+  "expected_chapters": [
+    "INTRODUCTION",
+    "MATERIALS AND METHODS",
+    "RESULTS AND DISCUSSION",
+    "FUTURE WORK AND CONCLUSION"
+  ],
+  "must_be_absent": [
+    "span id",
+    "doi:",
+    "the link in the text",
+    "re:page-?\\w+ to (zero|one)"
+  ],
+  "must_be_present": [
+    "stomatal conductance",
+    "vapor pressure deficit",
+    "zero point one",
+    "Penman"
+  ],
+  "notes": "Gao parsed cleanly: 4 body chapters detected, references/appendix skipped, no markup leaks. The 'works' baseline that proves the scorers do not flag a clean run."
+}

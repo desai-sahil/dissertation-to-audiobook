@@ -100,6 +100,11 @@ thesis-audiobook/
     conftest.py               # shared fixtures + autouse cost guard
     fixtures/                 # tiny.ir.json, golden IR, cassettes
     unit/ property/ golden/ integration/   # integration = @pytest.mark.live / contract
+  eval/                       # generalization gate (see 7.6): scorers + labeled corpus + scorecard
+    score.py                  # pure per-dimension scorers (output vs labels; architecture-agnostic)
+    run.py                    # score the corpus -> scorecard.{md,json} (offline)
+    corpus/<id>/              # labels.json + result.json + script.md snapshot (Gao, Zhu)
+    scorecard.md              # the committed v1 baseline the v2 rebuild must beat
 ```
 
 Rule of thumb: if a file under `normalization/` or `stages/` imports an SDK, `httpx`, or touches
@@ -199,6 +204,19 @@ script. This is the cheap regression net; regenerate intentionally with the syru
 `tests/fixtures/tiny.ir.json` (the golden IR the `MockParser` returns), the golden chapter6 IR +
 script, a small plant-physiology pronunciation lexicon, and `cassettes/` (recorded parser/LLM
 interactions) so contract tests run offline.
+
+### 7.6 The eval harness (generalization gate)
+
+Unit/property/golden tests fix the input and check the transform. They cannot measure
+*generalization* across theses - the failure mode that actually recurs as new theses arrive. `eval/`
+adds an output-vs-labels gate. `eval/score.py` (pure, unit-tested) scores a produced spoken script
+per dimension (structure, citation/markup strip, value preservation, raw-token leak) against
+`eval/corpus/<id>/labels.json`; `eval/run.py` writes `eval/scorecard.md`. The scorers are
+architecture-agnostic - they grade output, not how it was produced - so the same scorecard grades v1
+and the planned v2. The committed scorecard is the v1 baseline; it runs offline (it scores committed
+`script.md` snapshots), and `tests/unit/test_eval_score.py` pins the baseline numbers so a regression
+is caught by the normal suite. This is the acceptance gate for the v2 direction (functional spec,
+section 7).
 
 ---
 
@@ -322,6 +340,13 @@ stages) and `verifier_model` (Opus, the QC sweep/confirm); `parser_backend`, `ma
   author **copy-edit** stage + `copyedit_guard` (NotebookLM-style listenability without altering
   claims); the **update ledger**; and the live **status spinner** (`StatusReporter`). Each landed
   with an adversarial review of its guards and full suite/lint/type green.
+- **Eval harness + v2 reframe (current).** A labeled corpus + pure per-dimension scorers (`eval/`,
+  section 7.6) that quantify generalization across theses, committed as the v1 baseline (Gao clean;
+  Zhu fails structure/citation/value). This is the acceptance gate for the **v2 direction**
+  (functional spec, section 7): invert the labor split (the model produces faithful spoken text;
+  deterministic code verifies invariants) and ground the hard parts in page images, so the verifier
+  generalizes where the surface-form renderer did not. *Harness green; v2 build phases gated on the
+  baseline.*
 
 **Definition of done (per change):** ruff clean; `pyright` 0 errors on `src`; offline suite green;
 goldens unchanged or intentionally updated; no test triggered a live call; any new regex/guard

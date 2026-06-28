@@ -286,4 +286,29 @@ The suite is fully offline: parser contract tests replay committed cassettes, th
 are mocked, and an autouse cost guard makes any real ElevenLabs/Anthropic call fail. Tests
 needing real tools/keys are marked `live` and skipped by default.
 
+## The eval harness (generalization gate)
+
+Unit and golden tests prove a transform is correct on a fixed input. They do not measure whether the
+pipeline *generalizes* across theses - the thing that actually breaks when a new thesis arrives. The
+eval harness fills that gap: it scores a produced spoken script against per-thesis ground-truth
+labels, per dimension, so "does it work on a new thesis" becomes a number.
+
+```bash
+uv run python -m eval.run        # score the committed corpus -> eval/scorecard.md (offline, free)
+```
+
+- `eval/score.py` - pure scorers, architecture-agnostic (they grade *output vs labels*, never how it
+  was produced): structure (chapters detected vs real count), citation/markup strip (labeled leak
+  fingerprints absent), value preservation (labeled values survive), raw-token leak
+  (`FORBIDDEN_RAW_TOKENS`, with SSML control tags stripped first).
+- `eval/corpus/<id>/` - `labels.json` (ground truth) + `result.json` (chapters detected) + a
+  `script.md` snapshot. Seeded with Gao and Zhu.
+- The committed `eval/scorecard.md` is the **v1 baseline**: Gao parses cleanly (1.0 on every
+  dimension); Zhu fails three of four (0 of 6 chapters detected, markup read aloud, a lost constant).
+  That contrast is the "treadmill" quantified, and the bar the v2 rebuild must beat without
+  regressing. `tests/unit/test_eval_score.py` pins these numbers so a drift fails the normal suite.
+
+To score a new thesis: produce its script (`audiobook run ... --llm anthropic --tts mock`), copy it
+to `eval/corpus/<id>/script.md`, write its `labels.json` + `result.json`, and re-run.
+
 See [CLAUDE.md](CLAUDE.md) and [specs/](specs/) for the architecture and conventions.
