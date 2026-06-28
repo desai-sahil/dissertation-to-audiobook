@@ -144,6 +144,16 @@ def test_unspeakable_characters_are_caught() -> None:
     assert "5" in detail and "%" in detail  # a residual digit and a raw percent sign both trip it
 
 
+def test_check_values_false_skips_the_value_oracle() -> None:
+    # for VISION-grounded narration the page is ground truth, so the (mangled) text value oracle is
+    # skipped - but speakable/polarity/direction/paraphrase still apply.
+    src, spk = "rose by 0.5 units", "rose by zero point nine units"  # value differs from text
+    assert not verify_segment(src, spk).ok  # normally held
+    assert verify_segment(src, spk, check_values=False).ok  # vision-grounded: value oracle skipped
+    # the other checks still bite even when values are skipped:
+    assert not verify_segment("it increased", "it decreased", check_values=False).ok  # direction
+
+
 def test_clean_spoken_text_is_speakable() -> None:
     assert verify_segment("ok", "perfectly ordinary spoken prose, with punctuation.").ok
 

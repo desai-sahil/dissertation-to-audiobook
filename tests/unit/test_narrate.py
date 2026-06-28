@@ -48,14 +48,28 @@ def test_escalates_to_vision_and_succeeds() -> None:
     assert result.escalated and result.attempts == 3
 
 
-def test_escalation_still_failing_is_flagged() -> None:
+def test_vision_escalation_ships_despite_text_value_mismatch() -> None:
+    # the text path fails the value oracle and never recovers; the vision attempt re-reads the page
+    # and is accepted because the value oracle is skipped for vision-grounded narration (the page is
+    # ground truth, the text source was the mangled part). escalated=True.
     result = narrate_segment(
-        _SOURCE,
+        _SOURCE,  # "increased by 0.5 units"
+        generate=_replayer([_BAD, _BAD]),  # text keeps changing the value -> held
+        vision_generate=_replayer(["increased by zero point nine units"]),  # page-grounded
+    )
+    assert result.ok and result.escalated
+
+
+def test_escalation_still_failing_is_flagged() -> None:
+    # the vision attempt skips the value oracle, so to stay held it must break a non-value check:
+    # here a direction flip (increased -> decreased).
+    result = narrate_segment(
+        _SOURCE,  # "increased by 0.5 units"
         generate=_replayer([_BAD, _BAD]),
-        vision_generate=_replayer([_BAD]),
+        vision_generate=_replayer(["decreased by zero point five units"]),
     )
     assert not result.ok and result.escalated
-    assert any(v.kind == "values" for v in result.violations)
+    assert any(v.kind == "direction" for v in result.violations)
 
 
 def test_revision_prompt_carries_the_violations() -> None:

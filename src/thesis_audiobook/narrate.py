@@ -99,7 +99,10 @@ def narrate_segment(
     if vision_generate is not None:
         attempts += 1
         vspoken = parse_narration(vision_generate(build_narrate_prompt(source)))
-        vverdict = verify_segment(source, vspoken)
+        # The vision model re-read the page image (ground truth), so the text value-oracle - which
+        # compares against the mangled extraction we are escaping - is skipped; speakable / polarity
+        # / direction / paraphrase still gate it.
+        vverdict = verify_segment(source, vspoken, check_values=False)
         return NarrationResult(
             spoken=vspoken,
             ok=vverdict.ok,

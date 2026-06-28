@@ -13,6 +13,7 @@ trips on any real call in a non-live test.
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Callable
 
 from thesis_audiobook.context import Context
 from thesis_audiobook.engine import map_structure_to_blocks, narrate_document
@@ -48,6 +49,7 @@ class NarrateStage:
             assignments,
             generate=lambda prompt: self._generate(ctx, prompt),
             announce=_announce_nonprose,
+            vision_for=self._vision_for(ctx),
             max_workers=ctx.config.narrate_workers,
         )
         ctx.narration = outcome
@@ -58,6 +60,7 @@ class NarrateStage:
         ctx.log.info(
             "narrated",
             narrated=outcome.narrated,
+            escalated=outcome.escalated,
             held=outcome.held,
             skipped=outcome.skipped,
             reviewed=outcome.reviewed,
@@ -73,3 +76,35 @@ class NarrateStage:
         reply = ctx.llm.complete(prompt, system=NARRATE_SYSTEM, max_tokens=NARRATE_MAX_TOKENS)
         ctx.cache.put(key, reply.encode("utf-8"))
         return reply
+
+    def _vision_for(self, ctx: Context) -> Callable[[Block], Callable[[str], str] | None]:
+        """A per-block vision narrator over the block's rendered PAGE IMAGE, for held-segment
+        escalation. Returns None when the page is unavailable (no escalation). Each call is
+        content-addressed cached, and only invoked by the generator when the text path failed."""
+
+        def vision_for(block: Block) -> Callable[[str], str] | None:
+            if block.page is None or not ctx.page_images:
+                return None
+            index = block.page - 1
+            if not 0 <= index < len(ctx.page_images):
+                return None
+            image = ctx.page_images[index]
+
+            def generate(prompt: str) -> str:
+                payload = (
+                    f"{NARRATE_VERSION}\n{VERIFIER_VERSION}\nvision\n"
+                    f"{type(ctx.vision).__name__}\n{block.page}\n{prompt}"
+                )
+                key = "narrate_vision." + hashlib.sha256(payload.encode("utf-8")).hexdigest()
+                cached = ctx.cache.get(key)
+                if cached is not None:
+                    return cached.decode("utf-8")
+                reply = ctx.vision.describe(
+                    prompt, [image], system=NARRATE_SYSTEM, max_tokens=NARRATE_MAX_TOKENS
+                )
+                ctx.cache.put(key, reply.encode("utf-8"))
+                return reply
+
+            return generate
+
+        return vision_for

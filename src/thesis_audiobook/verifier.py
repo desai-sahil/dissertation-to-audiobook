@@ -248,12 +248,17 @@ def _verify_paraphrase(source: str, spoken: str) -> list[Violation]:
     return []
 
 
-def verify_segment(source: str, spoken: str) -> Verdict:
+def verify_segment(source: str, spoken: str, *, check_values: bool = True) -> Verdict:
     """Check a model-produced `spoken` rewrite against its `source` segment. ok=True means no floor
-    invariant was broken (NOT a proof of faithfulness)."""
+    invariant was broken (NOT a proof of faithfulness).
+
+    `check_values=False` skips the value oracle. Use it ONLY for VISION-GROUNDED narration (the
+    model re-read the page image): the oracle checks against the extracted `source` text, which for
+    an escalated segment is the mangled extraction we are escaping - the page is ground truth.
+    Speakable / polarity / direction / paraphrase still apply."""
     violations = [
         *_verify_speakable(spoken),
-        *_verify_values(source, spoken),
+        *(_verify_values(source, spoken) if check_values else []),
         *_verify_counts(source, spoken),
         *_verify_paraphrase(source, spoken),
     ]

@@ -60,6 +60,7 @@ class EngineOutcome(StrictModel):
     flagged: list[FlaggedSegment] = []
     narrated: int = 0  # prose shipped (passed the verifier)
     announced: int = 0  # equations/tables announced deterministically (bypass the verifier)
+    escalated: int = 0  # shipped via the vision page-image fallback (subset of narrated)
     held: int = 0  # narrated but failed the verifier -> not shipped
     skipped: int = 0
     reviewed: int = 0  # unmapped / review-kind -> not shipped, surfaced
@@ -225,6 +226,8 @@ def narrate_document(
             block.spoken = result.spoken
             block.keep = True
             outcome.narrated += 1
+            if result.escalated:
+                outcome.escalated += 1  # recovered via the vision page-image fallback
         else:
             block.keep = False  # never ship narration that failed the faithfulness floor
             outcome.held += 1

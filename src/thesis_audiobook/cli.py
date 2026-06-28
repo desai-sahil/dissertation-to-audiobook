@@ -147,6 +147,7 @@ def _write_v2_pairs(out: Path, doc: Document, ctx: Context) -> Path:
         "counts": (
             {
                 "narrated": outcome.narrated,
+                "escalated": outcome.escalated,
                 "announced": outcome.announced,
                 "held": outcome.held,
                 "skipped": outcome.skipped,
@@ -658,8 +659,9 @@ def run_v2(
     typer.echo(f"  faithfulness pairs: {pairs_path}")
     if counts is not None:
         typer.echo(
-            f"  segments          : {counts.narrated} narrated, {counts.announced} announced, "
-            f"{counts.held} held, {counts.skipped} skipped, {counts.reviewed} review"
+            f"  segments          : {counts.narrated} narrated ({counts.escalated} via vision), "
+            f"{counts.announced} announced, {counts.held} held, {counts.skipped} skipped, "
+            f"{counts.reviewed} review"
         )
         gate = review_gate(counts)
         typer.echo(f"  confidence        : {'NEEDS REVIEW - ' + gate if gate else 'ok'}")

@@ -187,6 +187,23 @@ def test_parallel_narration_is_order_preserving_and_identical() -> None:
     assert o1.narrated == o2.narrated == 2
 
 
+def test_engine_vision_escalation_recovers_and_counts() -> None:
+    # a read prose block whose text narration keeps failing the value oracle is recovered by the
+    # page-grounded vision fallback; it ships and is counted as escalated.
+    blocks = [_block("h", "I. INTRODUCTION", BlockType.heading), _block("p", "rose by 0.5")]
+
+    def gen(_prompt: str) -> str:
+        return "rose by zero point nine"  # text path: value mismatch -> held
+
+    def vision_for(_block: Block):
+        return lambda _prompt: "rose by zero point nine"  # page-grounded; value oracle skipped
+
+    o = narrate_document(
+        blocks, map_structure_to_blocks(blocks, _MAP), generate=gen, vision_for=vision_for
+    )
+    assert o.narrated == 1 and o.escalated == 1 and o.held == 0
+
+
 def test_review_gate_flags_high_held_or_review_rate() -> None:
     assert review_gate(EngineOutcome(narrated=10, held=0, reviewed=1)) is None  # 1/11 = 9% <= 15%
     assert review_gate(EngineOutcome(narrated=0)) is not None  # nothing narrated
