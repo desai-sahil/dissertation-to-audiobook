@@ -24,6 +24,7 @@ from thesis_audiobook.adapters.mocks import (
     MockParser,
     MockPronunciation,
     MockTts,
+    MockVision,
 )
 from thesis_audiobook.adapters.poppler_parser import PopplerParser
 from thesis_audiobook.adapters.status import NoopReporter, TerminalReporter
@@ -118,6 +119,7 @@ def build_context(
         parser=parser,
         llm=AnthropicClient(model=config.llm_model) if use_real_llm else MockLlm(),
         verifier_llm=(AnthropicClient(model=config.verifier_model) if use_real_llm else MockLlm()),
+        vision=AnthropicClient(model=config.llm_model) if use_real_llm else MockVision(),
         tts=ElevenLabsClient(api_key=api_key) if use_real_tts else MockTts(),
         cache=FileCache(config.cache_dir),
         muxer=FfmpegMuxer() if use_real_tts else MockMuxer(),

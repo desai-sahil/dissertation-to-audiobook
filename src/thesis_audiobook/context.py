@@ -22,6 +22,7 @@ from thesis_audiobook.ports.parser import PdfParser
 from thesis_audiobook.ports.pronunciation import PronunciationPublisher
 from thesis_audiobook.ports.reporter import StatusReporter
 from thesis_audiobook.ports.tts import TtsClient
+from thesis_audiobook.ports.vision import VisionClient
 from thesis_audiobook.pronunciation import DictionaryLocator, PronunciationLexicon
 from thesis_audiobook.provenance import ProvenanceMap
 from thesis_audiobook.script_qc import ScriptQcReport
@@ -73,6 +74,14 @@ def _noop_reporter() -> StatusReporter:
     return NoopReporter()
 
 
+def _mock_vision() -> VisionClient:
+    # Local import keeps context.py adapter-free; the default never networks (offline-safe), and
+    # bootstrap swaps in the real AnthropicClient for a v2 run, mirroring the llm default.
+    from thesis_audiobook.adapters.mocks import MockVision
+
+    return MockVision()
+
+
 @dataclass
 class Context:
     config: Config
@@ -87,6 +96,9 @@ class Context:
     warnings: WarningsSink
     # Ephemeral terminal progress; the no-op default keeps tests/dry-run silent.
     status: StatusReporter = field(default_factory=_noop_reporter)
+    # Vision port for the v2 engine (page-image structure + notation-dense narration escalation).
+    # Defaults to the offline MockVision; bootstrap wires the real client for `--engine v2`.
+    vision: VisionClient = field(default_factory=_mock_vision)
     lexicon: Lexicon = field(default_factory=_default_lexicon)
     pronunciation_lexicon: PronunciationLexicon = field(default_factory=_empty_pronunciation)
     # Run-scoped state.
