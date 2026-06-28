@@ -27,7 +27,7 @@ from thesis_audiobook.ports.vision import VisionClient
 VISION_IMAGE_BATCH = 50  # images per request; under Claude's 100-image cap, keeps tokens modest
 VISION_STRUCTURE_MAX_TOKENS = 2048
 
-VISION_STRUCTURE_VERSION = "vis-struct-v2"
+VISION_STRUCTURE_VERSION = "vis-struct-v3"  # v3: prompt tightened to top-level divisions only
 
 VISION_STRUCTURE_SYSTEM = (
     "You are a meticulous document-structure analyst. You read page images of a PhD thesis and "
@@ -110,8 +110,11 @@ def build_structure_prompt(first_page: int, last_page: int) -> str:
         f"These are pages {first_page} to {last_page} of a PhD thesis, in order. Identify each "
         "TOP-LEVEL division of the thesis that BEGINS on any of these pages, and classify what it "
         "IS. A division begins where its heading is printed near the top of a page, for example "
-        "'CHAPTER 2', 'II. BACKGROUND', 'Abstract', or 'REFERENCES'. Do NOT report section or "
-        "subsection headings, running headers, table-of-contents entries, or figure/table titles. "
+        "'CHAPTER 2', 'II. BACKGROUND', 'Abstract', or 'REFERENCES'. Report ONLY top-level "
+        "divisions, each ONCE. Do NOT report section or subsection headings, running headers, "
+        "table-of-contents entries, or figure/table titles. In particular, a chapter's own "
+        "subsection titled 'Introduction', 'Conclusion', 'Summary', 'Discussion', or 'Results' is "
+        "NOT a separate division - list the chapter, not its subsections. "
         f"For each division give: number (the printed label or empty string), title, start_page "
         f"(absolute, as shown), and kind, one of: {kinds}. Classify by what the division IS, "
         "not by its number: even if the thesis numbers its references or appendix in the same "

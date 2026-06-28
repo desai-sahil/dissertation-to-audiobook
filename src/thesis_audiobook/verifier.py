@@ -52,14 +52,16 @@ _SCOPE = frozenset(
     {"only", "all", "every", "each", "both", "more", "less", "fewer", "most", "least", "any",
      "some", "few", "many", "much"}
 )  # fmt: skip
+# above/below/under/over are deliberately EXCLUDED: they are usually positional ("as below", "see
+# above", "the term under") rather than a directional finding, and caused false positives.
 _UP = frozenset(
     {"increased", "increase", "increases", "increasing", "rose", "rise", "rises", "risen",
-     "higher", "highest", "greater", "greatest", "positive", "positively", "above", "faster",
+     "higher", "highest", "greater", "greatest", "positive", "positively", "faster",
      "doubled", "tripled", "quadrupled", "exceeded", "exceed", "gained", "gain", "upregulated"}
 )  # fmt: skip
 _DOWN = frozenset(
     {"decreased", "decrease", "decreases", "decreasing", "fell", "fall", "falls", "fallen",
-     "lower", "lowest", "lesser", "negative", "negatively", "below", "under", "slower", "halved",
+     "lower", "lowest", "lesser", "negative", "negatively", "slower", "halved",
      "lost", "loss", "downregulated"}
 )  # fmt: skip
 _WORD = re.compile(r"[a-z]+(?:'[a-z]+)?")

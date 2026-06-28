@@ -141,3 +141,6 @@ class Config(StrictModel):
     engine: str = "v1"
     # DPI for rendering PDF pages to images for the v2 vision passes (structure read).
     vision_dpi: int = 100
+    # Concurrent worker threads for v2 per-segment narration (independent calls; output is order-
+    # preserved and identical to sequential). Cuts wall time on long theses; cost is unchanged.
+    narrate_workers: int = 12

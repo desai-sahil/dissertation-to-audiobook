@@ -48,6 +48,7 @@ class NarrateStage:
             assignments,
             generate=lambda prompt: self._generate(ctx, prompt),
             announce=_announce_nonprose,
+            max_workers=ctx.config.narrate_workers,
         )
         ctx.narration = outcome
         for flag in outcome.flagged:

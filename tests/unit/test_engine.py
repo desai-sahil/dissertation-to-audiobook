@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-from thesis_audiobook.engine import map_structure_to_blocks, narrate_document
+from thesis_audiobook.engine import (
+    EngineOutcome,
+    map_structure_to_blocks,
+    narrate_document,
+    review_gate,
+)
 from thesis_audiobook.ir import Block, BlockType
 from thesis_audiobook.vision_structure import VisionSection, VisionStructureMap
 
@@ -135,6 +140,58 @@ def test_announce_hook_handles_equations_tables_and_subsection_headings() -> Non
     assert outcome.announced == 2  # eq + table (bypass the verifier)
     assert by["h1"].chapter == 1  # chapter-start heading keeps "Chapter N"
     assert by["sub"].chapter is None  # subsection heading -> no repeated "Chapter N"
+
+
+def test_ordered_matching_avoids_duplicate_chapter_from_repeated_subsection_title() -> None:
+    # Gao trap: a chapter's internal "Conclusion" subsection repeats a (noisy) vision section title.
+    # Ordered one-to-one matching consumes each section once, so the repeat stays a subsection.
+    smap = VisionStructureMap(
+        sections=[
+            VisionSection(number="1", title="Introduction", kind="body_chapter"),
+            VisionSection(number="2", title="Methods", kind="body_chapter"),
+        ]
+    )
+    blocks = [
+        _block("h1", "INTRODUCTION", BlockType.heading),
+        _block("c1", "Conclusion", BlockType.heading),  # subsection inside chapter 1
+        _block("h2", "METHODS", BlockType.heading),
+        _block("c2", "Conclusion", BlockType.heading),  # subsection inside chapter 2
+    ]
+    a = map_structure_to_blocks(blocks, smap)
+    assert a["h1"].section_head and a["h1"].chapter == 1
+    assert a["h2"].section_head and a["h2"].chapter == 2
+    assert not a["c1"].section_head and not a["c2"].section_head  # subsections, not chapter starts
+
+
+def test_parallel_narration_is_order_preserving_and_identical() -> None:
+    # max_workers > 1 must produce byte-identical output to sequential (results applied in order).
+    def gen(prompt: str) -> str:
+        if "alpha 0.5" in prompt:
+            return "alpha zero point five"
+        if "beta 0.9" in prompt:
+            return "beta zero point nine"
+        return "ok"
+
+    def build() -> list[Block]:
+        return [
+            _block("h", "I. INTRODUCTION", BlockType.heading),
+            _block("p1", "alpha 0.5"),
+            _block("p2", "beta 0.9"),
+        ]
+
+    seq, par = build(), build()
+    o1 = narrate_document(seq, map_structure_to_blocks(seq, _MAP), generate=gen, max_workers=1)
+    o2 = narrate_document(par, map_structure_to_blocks(par, _MAP), generate=gen, max_workers=8)
+    assert [b.spoken for b in seq] == [b.spoken for b in par]
+    assert [p.model_dump() for p in o1.pairs] == [p.model_dump() for p in o2.pairs]
+    assert o1.narrated == o2.narrated == 2
+
+
+def test_review_gate_flags_high_held_or_review_rate() -> None:
+    assert review_gate(EngineOutcome(narrated=10, held=0, reviewed=1)) is None  # 1/11 = 9% <= 15%
+    assert review_gate(EngineOutcome(narrated=0)) is not None  # nothing narrated
+    flagged = review_gate(EngineOutcome(narrated=5, held=3, reviewed=2))  # 5/10 = 50% > 15%
+    assert flagged is not None and "review" in flagged
 
 
 def test_narration_is_bounded_per_block() -> None:

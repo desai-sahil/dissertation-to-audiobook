@@ -24,9 +24,10 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 
 from thesis_audiobook.ir import Block, BlockType, StrictModel
-from thesis_audiobook.narrate import narrate_segment
+from thesis_audiobook.narrate import NarrationResult, narrate_segment
 from thesis_audiobook.verifier import Violation
 from thesis_audiobook.vision_structure import VisionStructureMap, section_decision
 
@@ -73,6 +74,23 @@ def strip_heading_enumerator(text: str) -> str:
     return stripped or text
 
 
+REVIEW_RATE_GATE = 0.15  # above this fraction held-or-for-review, recommend human review
+
+
+def review_gate(outcome: EngineOutcome) -> str | None:
+    """Confidence-gated escalation: if too many segments were held by the verifier or routed to
+    review, recommend a human look rather than shipping confidently-incomplete audio. Returns the
+    reason, or None if within tolerance."""
+    total = outcome.narrated + outcome.announced + outcome.held + outcome.reviewed
+    if total == 0:
+        return "nothing was narrated"
+    flagged = outcome.held + outcome.reviewed
+    rate = flagged / total
+    if rate > REVIEW_RATE_GATE:
+        return f"{flagged}/{total} segments held or flagged for review ({rate:.0%})"
+    return None
+
+
 def _heading_key(text: str) -> str:
     """A comparable key from a heading's TITLE: drop a leading enumerator, lowercase, collapse
     non-alphanumeric. So 'I. INTRODUCTION' and 'INTRODUCTION' both -> 'introduction' - matching on
@@ -89,7 +107,7 @@ def map_structure_to_blocks(
     it labels; its read/skip decision then propagates, in document order, to that heading and the
     blocks under it until the next matched section. Blocks before the first match are 'review'
     (never silently read or dropped). Body chapters get a 1-based index in section order."""
-    section_by_key: dict[str, tuple[str, int | None]] = {}
+    ordered: list[tuple[str, str, int | None]] = []  # (title key, kind, chapter), in section order
     chapter_no = 0
     for section in structure_map.sections:
         chapter: int | None = None
@@ -98,19 +116,27 @@ def map_structure_to_blocks(
             chapter = chapter_no
         key = _heading_key(section.title)  # match on the title; vision's number field is unreliable
         if key:
-            section_by_key[key] = (section.kind, chapter)
+            ordered.append((key, section.kind, chapter))
 
+    # Ordered, one-to-one matching: walk the sections and headings together, consuming each section
+    # at most once. A later heading whose title repeats an already-consumed section (a chapter's own
+    # "Conclusion"/"Introduction" subsection) cannot re-match it, so it stays a subsection and does
+    # not trigger a duplicate "Chapter N".
     result: dict[str, BlockAssignment] = {}
     cur_decision, cur_kind = "review", "unmapped"
     cur_chapter: int | None = None
+    next_idx = 0
     for block in blocks:
         is_section_head = False
         if block.type is BlockType.heading:
-            hit = section_by_key.get(_heading_key(block.text))
-            if hit is not None:
-                cur_kind, cur_chapter = hit
-                cur_decision = section_decision(cur_kind)
-                is_section_head = True
+            hkey = _heading_key(block.text)
+            for j in range(next_idx, len(ordered)):
+                if ordered[j][0] == hkey:
+                    _, cur_kind, cur_chapter = ordered[j]
+                    cur_decision = section_decision(cur_kind)
+                    is_section_head = True
+                    next_idx = j + 1
+                    break
         result[block.id] = BlockAssignment(
             decision=cur_decision, kind=cur_kind, chapter=cur_chapter, section_head=is_section_head
         )
@@ -125,13 +151,18 @@ def narrate_document(
     announce: Callable[[Block], str | None] | None = None,
     vision_for: Callable[[Block], Callable[[str], str] | None] | None = None,
     max_text_attempts: int = 2,
+    max_workers: int = 1,
 ) -> EngineOutcome:
-    """Narrate the read prose blocks in place; announce/skip the rest. Bounded and single-pass (see
-    module docs). `generate` is the text model; `announce(block)` returns a deterministic
-    announcement for a non-prose block (equation/table) or None to skip it - announcements BYPASS
-    the verifier, since they deliberately omit the source's symbols. `vision_for(block)` optionally
-    returns a per-block vision generator for escalation (None = text-only first cut)."""
+    """Narrate the read prose blocks in place; announce/skip the rest. `generate` is the text model;
+    `announce(block)` returns a deterministic announcement for a non-prose block (equation/table) or
+    None to skip it - announcements BYPASS the verifier, since they deliberately omit the source's
+    symbols. `vision_for(block)` optionally returns a per-block vision generator for escalation.
+
+    The per-block narrations are INDEPENDENT, so with max_workers > 1 they run concurrently and the
+    results are applied in document order - output is byte-identical to the sequential path, only
+    faster (each narrate_segment is still hard-capped, so total calls stay bounded)."""
     outcome = EngineOutcome()
+    to_narrate: list[Block] = []
     for block in blocks:
         assignment = assignments.get(block.id)
         if assignment is None:
@@ -169,14 +200,24 @@ def narrate_document(
                 block.keep = False
                 outcome.skipped += 1
             continue
+        to_narrate.append(block)
 
+    def _narrate(block: Block) -> NarrationResult:
         vision_generate = vision_for(block) if vision_for is not None else None
-        result = narrate_segment(
+        return narrate_segment(
             block.text,
             generate=generate,
             vision_generate=vision_generate,
             max_text_attempts=max_text_attempts,
         )
+
+    if max_workers > 1 and len(to_narrate) > 1:
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            results = list(pool.map(_narrate, to_narrate))  # map preserves input order
+    else:
+        results = [_narrate(block) for block in to_narrate]
+
+    for block, result in zip(to_narrate, results, strict=True):
         outcome.pairs.append(
             SegmentPair(block_id=block.id, source=block.text, spoken=result.spoken)
         )

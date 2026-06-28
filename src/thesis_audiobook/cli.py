@@ -25,6 +25,7 @@ from thesis_audiobook.config import Config, OutputMode, ParserBackend, profile_f
 from thesis_audiobook.context import Context
 from thesis_audiobook.cost import estimate_cost
 from thesis_audiobook.curate import PronunciationPlan
+from thesis_audiobook.engine import review_gate
 from thesis_audiobook.extraction_qc import (
     EXTRACTION_QC_MAX_TOKENS,
     EXTRACTION_QC_SYSTEM,
@@ -660,6 +661,8 @@ def run_v2(
             f"  segments          : {counts.narrated} narrated, {counts.announced} announced, "
             f"{counts.held} held, {counts.skipped} skipped, {counts.reviewed} review"
         )
+        gate = review_gate(counts)
+        typer.echo(f"  confidence        : {'NEEDS REVIEW - ' + gate if gate else 'ok'}")
     typer.echo(
         "  no paid calls were made (LLM mocked)."
         if not use_real_llm

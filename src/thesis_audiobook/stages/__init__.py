@@ -55,6 +55,7 @@ def v2_stages() -> list[Stage]:
         BuildIrStage(),
         VisionCartographerStage(),
         NarrateStage(),
+        AppendixSignpostStage(),  # one-time aside when a chapter cites a skipped appendix
         AssembleScriptStage(),
         LexiconStage(),
         TtsStage(),
