@@ -48,7 +48,7 @@ _SPEAKABLE: frozenset[str] = frozenset(
     set(string.ascii_letters)
     | set(" \t\n")
     | set(".,;:!?'\"()-")
-    | {"–", "‘", "’", "“", "”", "…"}  # en dash, smart quotes, ellipsis
+    | {"–", "—", "‘", "’", "“", "”", "…"}  # en/em dash, smart quotes, ellipsis (all speakable)
 )
 
 # Value tokens whose change would alter a claim: decimals (measurements, ratios, p-values) and
