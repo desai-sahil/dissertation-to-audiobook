@@ -68,6 +68,13 @@ def test_cross_reference_numbers_are_not_required_values() -> None:
     assert verify_segment("Equation 3.4 gives the result.", "An equation gives the result.").ok
 
 
+def test_lone_parenthesized_decimal_is_an_equation_number() -> None:
+    # "(2.15)" alone in parens is an equation/figure number, not a measurement.
+    assert verify_segment("the relation (2.15) follows from above", "the relation follows").ok
+    # but a parenthesized value WITH a unit is still a measurement that must survive
+    assert not verify_segment("the pressure (0.5 MPa) held", "the pressure held").ok
+
+
 def test_real_negative_decimal_still_checked() -> None:
     # a genuine negative (after a space) keeps its sign and must survive.
     assert not verify_segment("a delta of -2.4 units", "a delta of two units").ok

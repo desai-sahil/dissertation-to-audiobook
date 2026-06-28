@@ -127,8 +127,11 @@ def _source_value_tokens(source: str) -> list[str]:
     (Figure 2.1, Eq. 3.4), which are pointers, not measurements."""
     found: list[tuple[int, str]] = []
     for m in _DECIMAL.finditer(source):
-        if _XREF.search(source[max(0, m.start() - 24) : m.start()]):
-            continue  # a cross-reference, not a value to preserve
+        before = source[max(0, m.start() - 24) : m.start()]
+        if _XREF.search(before):
+            continue  # a cross-reference (Figure 2.1), not a value to preserve
+        if before.endswith("(") and source[m.end() : m.end() + 1] == ")":
+            continue  # a lone parenthesized number, e.g. "(2.15)" - an equation/figure number
         found.append((m.start(), m.group()))
     for m in _PERCENT_INT.finditer(source):
         found.append((m.start(), m.group()))
