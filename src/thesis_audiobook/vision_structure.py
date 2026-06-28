@@ -22,6 +22,10 @@ import json
 from typing import Any, cast
 
 from thesis_audiobook.ir import StrictModel
+from thesis_audiobook.ports.vision import VisionClient
+
+VISION_IMAGE_BATCH = 50  # images per request; under Claude's 100-image cap, keeps tokens modest
+VISION_STRUCTURE_MAX_TOKENS = 2048
 
 VISION_STRUCTURE_VERSION = "vis-struct-v2"
 
@@ -179,3 +183,27 @@ def merge_maps(maps: list[VisionStructureMap]) -> VisionStructureMap:
             sections.append(section)
     sections.sort(key=lambda s: (s.start_page is None, s.start_page or 0))
     return VisionStructureMap(sections=sections)
+
+
+def collect_structure(
+    images: list[bytes],
+    vision: VisionClient,
+    *,
+    batch: int = VISION_IMAGE_BATCH,
+    max_tokens: int = VISION_STRUCTURE_MAX_TOKENS,
+) -> VisionStructureMap:
+    """Read structure from page images in batches (Claude caps a request at 100 images) and merge.
+    Bounded: one describe() call per ceil(len(images)/batch) batch, no retries here. Pure given the
+    injected client."""
+    maps: list[VisionStructureMap] = []
+    for start in range(0, len(images), batch):
+        chunk = images[start : start + batch]
+        first, last = start + 1, start + len(chunk)
+        raw = vision.describe(
+            build_structure_prompt(first, last),
+            chunk,
+            system=VISION_STRUCTURE_SYSTEM,
+            max_tokens=max_tokens,
+        )
+        maps.append(parse_structure_map(raw))
+    return merge_maps(maps)

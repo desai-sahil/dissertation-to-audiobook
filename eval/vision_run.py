@@ -18,16 +18,13 @@ import sys
 from pathlib import Path
 
 from eval.score import Labels, StructureResult, score_structure
-from thesis_audiobook.ports.vision import VisionClient
 from thesis_audiobook.vision_structure import (
-    VISION_STRUCTURE_SYSTEM,
+    VISION_IMAGE_BATCH,
+    VISION_STRUCTURE_MAX_TOKENS,
     VisionSection,
-    VisionStructureMap,
     body_chapters,
-    build_structure_prompt,
     chapters_detected,
-    merge_maps,
-    parse_structure_map,
+    collect_structure,
     read_sections,
     review_sections,
     skipped_sections,
@@ -35,26 +32,6 @@ from thesis_audiobook.vision_structure import (
 
 HERE = Path(__file__).parent
 CORPUS = HERE / "corpus"
-IMAGE_BATCH = 50  # images per request; well under Claude's 100-image cap, keeps tokens modest
-STRUCTURE_MAX_TOKENS = 2048
-
-
-def collect_structure(
-    images: list[bytes],
-    vision: VisionClient,
-    *,
-    batch: int = IMAGE_BATCH,
-    max_tokens: int = STRUCTURE_MAX_TOKENS,
-) -> VisionStructureMap:
-    """Read structure from page images in batches and merge. Pure given the injected client."""
-    maps: list[VisionStructureMap] = []
-    for start in range(0, len(images), batch):
-        chunk = images[start : start + batch]
-        first, last = start + 1, start + len(chunk)
-        prompt = build_structure_prompt(first, last)
-        raw = vision.describe(prompt, chunk, system=VISION_STRUCTURE_SYSTEM, max_tokens=max_tokens)
-        maps.append(parse_structure_map(raw))
-    return merge_maps(maps)
 
 
 def main() -> None:  # pragma: no cover - billed path (renders + real vision call); user-run
@@ -69,9 +46,9 @@ def main() -> None:  # pragma: no cover - billed path (renders + real vision cal
 
     print(f"rendering {pdf_path} at {dpi} dpi ...")
     images = render_pdf_pages(pdf_path, dpi=dpi)
-    print(f"  {len(images)} pages; reading structure in batches of {IMAGE_BATCH} ...")
+    print(f"  {len(images)} pages; reading structure in batches of {VISION_IMAGE_BATCH} ...")
 
-    vision = AnthropicClient(max_tokens=STRUCTURE_MAX_TOKENS)
+    vision = AnthropicClient(max_tokens=VISION_STRUCTURE_MAX_TOKENS)
     structure = collect_structure(images, vision)
 
     labels = Labels.model_validate_json((CORPUS / thesis_id / "labels.json").read_text("utf-8"))
