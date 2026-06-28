@@ -636,11 +636,14 @@ def run_v2(
         status=build_terminal_reporter(),
     )
     if use_real_llm:
-        # I/O at the edge (composition root): render the pages the vision cartographer reads.
-        from thesis_audiobook.adapters.pdf_render import render_pdf_bytes
+        # I/O at the edge (composition root): render the pages the vision cartographer reads, and
+        # extract per-page text so blocks can be located on a page for vision escalation even when
+        # this thesis's Marker run emitted no page anchors.
+        from thesis_audiobook.adapters.pdf_render import extract_pages_text, render_pdf_bytes
 
         typer.echo(f"rendering {input_pdf} at {dpi} dpi ...")
         ctx.page_images = render_pdf_bytes(ctx.pdf_bytes, dpi=dpi)
+        ctx.page_texts = extract_pages_text(ctx.pdf_bytes)
 
     out.mkdir(parents=True, exist_ok=True)
     seed_doc = Document(meta=DocumentMeta(title="(pending)"))

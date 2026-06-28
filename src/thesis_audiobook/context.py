@@ -41,6 +41,10 @@ def _new_bytes_list() -> list[bytes]:
     return []
 
 
+def _new_str_list() -> list[str]:
+    return []
+
+
 def _new_str_map() -> dict[str, str]:
     return {}
 
@@ -114,6 +118,9 @@ class Context:
     # v2 engine run-scoped state: page images (rendered by the CLI edge), the vision structure map,
     # and the narration outcome (pairs for faithfulness scoring + flagged-for-review segments).
     page_images: list[bytes] = field(default_factory=_new_bytes_list)
+    page_texts: list[str] = field(
+        default_factory=_new_str_list
+    )  # per-page text for block->page align
     vision_structure: VisionStructureMap | None = None
     narration: EngineOutcome | None = None
     reclassifications: list[Reclassification] = field(default_factory=_new_reclass)

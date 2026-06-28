@@ -16,6 +16,7 @@ from thesis_audiobook.stages.lexicon import LexiconStage
 from thesis_audiobook.stages.math import MathStage
 from thesis_audiobook.stages.narrate import NarrateStage
 from thesis_audiobook.stages.normalize import NormalizeStage
+from thesis_audiobook.stages.page_align import PageAlignStage
 from thesis_audiobook.stages.script_qc import ScriptQcStage
 from thesis_audiobook.stages.script_repair import ScriptRepairStage
 from thesis_audiobook.stages.select import SelectStage
@@ -53,6 +54,7 @@ def v2_stages() -> list[Stage]:
     return [
         IngestStage(),
         BuildIrStage(),
+        PageAlignStage(),  # block -> physical page (for vision escalation), if not Marker-anchored
         VisionCartographerStage(),
         NarrateStage(),
         AppendixSignpostStage(),  # one-time aside when a chapter cites a skipped appendix

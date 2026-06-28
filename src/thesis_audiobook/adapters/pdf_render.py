@@ -38,3 +38,17 @@ def render_pdf_bytes(
         pdf_path = Path(tmp) / "input.pdf"
         pdf_path.write_bytes(pdf_bytes)
         return render_pdf_pages(pdf_path, dpi=dpi)
+
+
+def extract_pages_text(
+    pdf_bytes: bytes,
+) -> list[str]:  # pragma: no cover - shells out to poppler's pdftotext
+    """Plain text of each physical page via pdftotext (pages are form-feed separated). The same
+    poppler that renders the page images, so the returned page order matches render_pdf_bytes."""
+    with tempfile.TemporaryDirectory() as tmp:
+        pdf_path = Path(tmp) / "input.pdf"
+        pdf_path.write_bytes(pdf_bytes)
+        result = subprocess.run(
+            ["pdftotext", str(pdf_path), "-"], check=True, capture_output=True, text=True
+        )
+        return result.stdout.split("\f")
