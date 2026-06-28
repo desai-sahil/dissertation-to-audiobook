@@ -87,8 +87,17 @@ _SPEAKABLE: frozenset[str] = frozenset(
 
 # Value tokens whose change would alter a claim: decimals (measurements, ratios, p-values) and
 # integers written as a percentage. Bare integers are intentionally out of scope (see module docs).
-_DECIMAL = re.compile(r"-?\d[\d,]*\.\d+")
-_PERCENT_INT = re.compile(r"-?\d[\d,]*(?=\s*%)")
+# The (?<![\w.]) lookbehind means a leading "-" only counts as a sign when it is NOT preceded by a
+# digit/word/dot, so a hyphenated RANGE like "2.2-2.4" yields 2.2 and 2.4 (both positive), not a
+# spurious "-2.4"; a genuine " -2.4" (after a space) keeps its sign.
+_DECIMAL = re.compile(r"(?<![\w.])-?\d[\d,]*\.\d+")
+_PERCENT_INT = re.compile(r"(?<![\w.])-?\d[\d,]*(?=\s*%)")
+# Cross-reference context: a number right after one of these is a POINTER (Figure 2.1, Eq. 3.4,
+# Table 5, Section 2.2), not a measurement, so it is not required to survive into the spoken text.
+_XREF = re.compile(
+    r"(?i)\b(figs?|figure|figures|eqn?|eqs|equation|equations|tables?|sections?|sec|chapters?|"
+    r"appendix|appendices|refs?|panels?)\.?\s*\(?\s*$"
+)
 
 
 class Violation(StrictModel):
@@ -114,9 +123,12 @@ def _find_phrase(haystack: str, needle: str, start: int) -> int:
 
 
 def _source_value_tokens(source: str) -> list[str]:
-    """Decimals and percentage integers in source, in order of appearance."""
+    """Decimals and percentage integers in source, in order - excluding cross-reference numbers
+    (Figure 2.1, Eq. 3.4), which are pointers, not measurements."""
     found: list[tuple[int, str]] = []
     for m in _DECIMAL.finditer(source):
+        if _XREF.search(source[max(0, m.start() - 24) : m.start()]):
+            continue  # a cross-reference, not a value to preserve
         found.append((m.start(), m.group()))
     for m in _PERCENT_INT.finditer(source):
         found.append((m.start(), m.group()))
