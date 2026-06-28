@@ -1,10 +1,12 @@
 """The v2 engine (phase D2): drive a Document from the vision structure map to spoken blocks.
 
-Given the ingested IR blocks and the vision structure map, this maps each block to its governing
-section (by page), applies the read/skip policy, and narrates each READ prose block through the
-verifier-gated generator. It mutates blocks in place (sets spoken / keep / chapter, the pipeline
-convention) and returns the (source, spoken) pairs for faithfulness scoring plus anything flagged
-for human review.
+Given the ingested IR blocks and the vision structure map, this anchors each vision section to the
+IR's own heading blocks (the boundaries) while taking each section's read/skip KIND from vision (the
+semantics), applies the policy, and narrates each READ prose block through the verifier-gated
+generator. Heading-anchoring is deliberate: vision's page-number estimates drift on later pages, but
+the printed heading text it labels is exact. It mutates blocks in place (sets spoken / keep /
+chapter, the pipeline convention) and returns the (source, spoken) pairs for faithfulness scoring
+plus anything flagged for human review.
 
 COST SAFETY (by construction, not by luck):
   - It walks a FINITE block list exactly ONCE - no re-queue, no while-loop.
@@ -20,6 +22,7 @@ Pure: no I/O, no SDK; the model callables are injected by the stage.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 
 from thesis_audiobook.ir import Block, BlockType, StrictModel
@@ -59,38 +62,44 @@ class EngineOutcome(StrictModel):
     reviewed: int = 0  # unmapped / review-kind -> not shipped, surfaced
 
 
+def _heading_key(text: str) -> str:
+    """Normalize a heading (or a vision section's number + title) to a comparable key: lowercase,
+    non-alphanumeric collapsed to spaces. 'VII. REFERENCES' and 'VII REFERENCES' both -> 'vii
+    references'; a subsection 'III.A. ...' -> 'iii a ...' won't collide with chapter 'iii ...'."""
+    return " ".join(re.sub(r"[^a-z0-9]+", " ", text.lower()).split())
+
+
 def map_structure_to_blocks(
     blocks: list[Block], structure_map: VisionStructureMap
 ) -> dict[str, BlockAssignment]:
-    """Assign each block its governing section's decision/kind and (for body chapters) a 1-based
-    chapter index, by page. A block before the first section or with no page is 'review' (never
-    silently read or dropped)."""
-    ordered = sorted(
-        structure_map.sections, key=lambda s: (s.start_page is None, s.start_page or 0)
-    )
-    annotated: list[tuple[int | None, str, int | None]] = []  # (start_page, kind, chapter_index)
+    """Anchor the vision sections to the IR's own heading blocks (robust to vision's page-number
+    drift). Each top-level vision section is matched to the heading whose printed text it labels;
+    its read/skip decision then propagates, in document order, to that heading and the blocks under
+    it until the next matched section. Blocks before the first match are 'review' (never silently
+    read or dropped). A 1-based chapter index is assigned to body chapters in section order."""
+    section_by_key: dict[str, tuple[str, int | None]] = {}
     chapter_no = 0
-    for section in ordered:
+    for section in structure_map.sections:
+        chapter: int | None = None
         if section.kind.strip().lower() == "body_chapter":
             chapter_no += 1
-            annotated.append((section.start_page, section.kind, chapter_no))
-        else:
-            annotated.append((section.start_page, section.kind, None))
+            chapter = chapter_no
+        key = _heading_key(f"{section.number} {section.title}")
+        if key:
+            section_by_key[key] = (section.kind, chapter)
 
     result: dict[str, BlockAssignment] = {}
+    cur_decision, cur_kind = "review", "unmapped"
+    cur_chapter: int | None = None
     for block in blocks:
-        gov_kind = "unmapped"
-        gov_chapter: int | None = None
-        if block.page is not None:
-            for start_page, kind, chapter in annotated:
-                if start_page is None:
-                    continue
-                if start_page <= block.page:
-                    gov_kind, gov_chapter = kind, chapter
-                else:
-                    break  # ordered ascending: no later section can govern this page
-        decision = section_decision(gov_kind) if gov_kind != "unmapped" else "review"
-        result[block.id] = BlockAssignment(decision=decision, kind=gov_kind, chapter=gov_chapter)
+        if block.type is BlockType.heading:
+            hit = section_by_key.get(_heading_key(block.text))
+            if hit is not None:
+                cur_kind, cur_chapter = hit
+                cur_decision = section_decision(cur_kind)
+        result[block.id] = BlockAssignment(
+            decision=cur_decision, kind=cur_kind, chapter=cur_chapter
+        )
     return result
 
 

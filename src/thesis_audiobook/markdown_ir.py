@@ -22,6 +22,12 @@ _SINGLE_SECTION = re.compile(r"^(\d+)\s+(\S.*)$")  # a bare integer section: "2 
 _DIVIDER = re.compile(r"(?i)^chapter\s+(\d+)$")
 _APPENDIX = re.compile(r"(?i)^appendix\b")  # an appendix heading (after any number/letter strip)
 _IMAGE = re.compile(r"^!\[(?P<alt>[^\]]*)\]\([^)]*\)\s*$")
+# Marker marks each new page with an empty anchor span, <span id="page-N-M"></span> (N is its
+# 0-indexed page). We read N to set block.page (1-indexed physical, matching the rendered pages the
+# vision passes see), and strip ALL span tags so they never pollute a heading's text or leak into
+# narration (the v1 "span id ... page nine" read-aloud bug).
+_PAGE_ANCHOR = re.compile(r'<span\s+id="page-(\d+)-\d+"\s*>\s*</span>')
+_SPAN = re.compile(r"</?span[^>]*>")
 
 
 def _is_table(lines: list[str]) -> bool:
@@ -42,13 +48,19 @@ def _clean_title(content: str) -> str:
 def markdown_to_document(markdown: str, *, title: str | None = None) -> Document:
     blocks: list[Block] = []
     chapter: int | None = None
+    page: int | None = None
     derived_title: str | None = None
     seq = 0
 
     for chunk in re.split(r"\n\s*\n", markdown):
-        text = chunk.strip()
-        if not text:
+        raw = chunk.strip()
+        if not raw:
             continue
+        for anchor in _PAGE_ANCHOR.finditer(raw):
+            page = int(anchor.group(1)) + 1  # 1-indexed physical page
+        text = _SPAN.sub("", raw).strip()
+        if not text:
+            continue  # the chunk was only a page anchor / span tags
         lines = text.split("\n")
         seq += 1
         block_id = f"m{seq}"
@@ -62,6 +74,7 @@ def markdown_to_document(markdown: str, *, title: str | None = None) -> Document
                     id=block_id,
                     type=BlockType.equation_display,
                     chapter=chapter,
+                    page=page,
                     text=display,
                     latex=display,
                 )
@@ -98,6 +111,7 @@ def markdown_to_document(markdown: str, *, title: str | None = None) -> Document
                     id=block_id,
                     type=BlockType.heading,
                     chapter=chapter,
+                    page=page,
                     section=section,
                     text=content,
                 )
@@ -111,6 +125,7 @@ def markdown_to_document(markdown: str, *, title: str | None = None) -> Document
                     id=block_id,
                     type=BlockType.figure_caption,
                     chapter=chapter,
+                    page=page,
                     text=image.group("alt").strip(),
                 )
             )
@@ -118,7 +133,9 @@ def markdown_to_document(markdown: str, *, title: str | None = None) -> Document
 
         block_type = BlockType.table if _is_table(lines) else BlockType.paragraph
         flattened = text if block_type is BlockType.table else " ".join(lines)
-        blocks.append(Block(id=block_id, type=block_type, chapter=chapter, text=flattened))
+        blocks.append(
+            Block(id=block_id, type=block_type, chapter=chapter, page=page, text=flattened)
+        )
 
     # Appendices (and everything after them, e.g. a trailing bibliography or source-code listing)
     # are back matter: read only when the profile opts in (select gates BlockType.backmatter on

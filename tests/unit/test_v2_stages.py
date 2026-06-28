@@ -50,6 +50,7 @@ def _doc() -> Document:
     return Document(
         meta=DocumentMeta(title="t"),
         blocks=[
+            Block(id="h1", type=BlockType.heading, page=5, text="I. INTRODUCTION"),
             Block(id="b1", type=BlockType.paragraph, page=5, text="the value rose to 0.5 units"),
             Block(id="b2", type=BlockType.paragraph, page=6, text="the value held steady"),
         ],
@@ -105,4 +106,4 @@ def test_v2_offline_with_mocks_is_safe_noop(tiny_ir_path: Path) -> None:
     VisionCartographerStage().run(doc, ctx)
     NarrateStage().run(doc, ctx)
     assert ctx.narration is not None and ctx.narration.narrated == 0
-    assert ctx.narration.reviewed == 2  # unmapped -> review, not shipped
+    assert ctx.narration.reviewed == 3  # all 3 blocks unmapped -> review, not shipped
