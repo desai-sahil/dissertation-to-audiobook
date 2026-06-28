@@ -1,14 +1,19 @@
-"""Vision-grounded structure pass (v2 prototype): pure prompt + typed map + defensive parser.
+"""Vision-grounded structure pass (v2 cartographer): pure prompt + typed map + defensive parser.
 
-The model reads page images of a thesis and reports its BODY CHAPTERS (under any numbering scheme)
-and which non-body region kinds appear, as JSON. This is the v2 cartographer's read step, grounded
-in the rendered page instead of lossy extracted text - the case v1 got wrong on Zhu, whose
+The model reads page images of a thesis and classifies each TOP-LEVEL division with a semantic
+KIND (body_chapter, abstract, references, appendix, ...). This is the v2 cartographer's read step,
+grounded in the rendered page instead of lossy extracted text - the case v1 got wrong on Zhu, whose
 roman-numeral, span-wrapped headings yielded zero detected chapters.
 
-Everything here is pure (no I/O, no SDK): the image rendering lives in adapters/pdf_render.py, the
-billed call behind the VisionClient port, and the orchestration in eval/vision_run.py. The parser is
-deliberately lenient (defensive extraction, empty-on-failure) so a stray field or a fenced code
-block in the model's reply degrades to a usable or empty map, never a crash.
+A unified section list (rather than separate "chapters" and "regions") matters because a thesis can
+number its back matter in the same sequence as its chapters: Zhu prints "VII. REFERENCES" and
+"VIII. APPENDIX". Asking the model what each division *is* lets "VII. REFERENCES" come back as
+`references` (skipped), not as a body chapter that would be read aloud. The model only LABELS; a
+deterministic policy below decides read/skip, so a relabel can never silently change what is spoken.
+
+Everything here is pure (no I/O, no SDK): image rendering lives in adapters/pdf_render.py, the
+billed call behind the VisionClient port, the orchestration in eval/vision_run.py. The parser is
+lenient (empty-on-failure) so a stray field or a code fence degrades into a usable or empty map.
 """
 
 from __future__ import annotations
@@ -18,73 +23,100 @@ from typing import Any, cast
 
 from thesis_audiobook.ir import StrictModel
 
-VISION_STRUCTURE_VERSION = "vis-struct-v1"
+VISION_STRUCTURE_VERSION = "vis-struct-v2"
 
 VISION_STRUCTURE_SYSTEM = (
     "You are a meticulous document-structure analyst. You read page images of a PhD thesis and "
     "report its structure as JSON. Output ONLY valid JSON: no markdown, no code fences, no prose."
 )
 
+# Every semantic kind the model may assign. body_chapter is the dissertation's argument; the rest
+# are front matter or back matter. Any kind the model returns that is not here routes to review.
+SECTION_KINDS = (
+    "body_chapter",
+    "abstract",
+    "acknowledgements",
+    "dedication",
+    "biographical_sketch",
+    "table_of_contents",
+    "list_of_figures",
+    "list_of_tables",
+    "references",
+    "appendix",
+)
 
-class VisionChapter(StrictModel):
-    number: str  # the printed chapter label as-is: "2", "II", "Four" (may be empty if untitled)
-    title: str
-    start_page: int | None = None  # absolute page number where the heading is printed
-
-
-class VisionStructureMap(StrictModel):
-    chapters: list[VisionChapter] = []
-    regions: list[str] = []  # non-body region kinds seen (read/skip decided by the policy below)
-
-
-# --- read-vs-skip policy (deterministic; the model only LABELS a region's kind) ---
-# The author's decision: front matter is largely SPOKEN; only navigation aids and back matter are
-# dropped. Encoding it here (not in the prompt) keeps it auditable and claim-safe - a relabel can
-# never silently change what is read. An unknown kind routes to review, never a silent skip.
-READ_REGION_KINDS = frozenset({"abstract", "acknowledgements", "dedication", "biographical_sketch"})
-SKIP_REGION_KINDS = frozenset(
+# --- read-vs-skip policy (deterministic; the model only LABELS a section's kind) ---
+# The author's decision: chapters and front matter are SPOKEN; navigation aids and back matter
+# (references, appendix) are skipped. An unknown kind routes to review, never a silent skip.
+READ_SECTION_KINDS = frozenset(
+    {"body_chapter", "abstract", "acknowledgements", "dedication", "biographical_sketch"}
+)
+SKIP_SECTION_KINDS = frozenset(
     {"table_of_contents", "list_of_figures", "list_of_tables", "references", "appendix"}
 )
 
 
-def region_decision(kind: str) -> str:
-    """'read' | 'skip' | 'review' for a non-body region kind."""
+class VisionSection(StrictModel):
+    number: str  # the printed label as-is: "2", "II", "A" (may be empty for an unnumbered section)
+    title: str
+    start_page: int | None = None  # absolute page number where the heading is printed
+    kind: str = "unknown"  # one of SECTION_KINDS, else 'unknown' -> review
+
+
+class VisionStructureMap(StrictModel):
+    sections: list[VisionSection] = []
+
+
+def section_decision(kind: str) -> str:
+    """'read' | 'skip' | 'review' for a section kind."""
     normalized = kind.strip().lower()
-    if normalized in READ_REGION_KINDS:
+    if normalized in READ_SECTION_KINDS:
         return "read"
-    if normalized in SKIP_REGION_KINDS:
+    if normalized in SKIP_SECTION_KINDS:
         return "skip"
     return "review"
 
 
-def read_regions(structure_map: VisionStructureMap) -> list[str]:
-    return [r for r in structure_map.regions if region_decision(r) == "read"]
+def body_chapters(structure_map: VisionStructureMap) -> list[VisionSection]:
+    """The dissertation's actual chapters - kind == body_chapter only. Excludes a references or
+    appendix section even when the thesis numbers it in the same sequence (Zhu's VII/VIII)."""
+    return [s for s in structure_map.sections if s.kind.strip().lower() == "body_chapter"]
 
 
-def skipped_regions(structure_map: VisionStructureMap) -> list[str]:
-    return [r for r in structure_map.regions if region_decision(r) == "skip"]
+def read_sections(structure_map: VisionStructureMap) -> list[VisionSection]:
+    return [s for s in structure_map.sections if section_decision(s.kind) == "read"]
 
 
-def review_regions(structure_map: VisionStructureMap) -> list[str]:
-    return [r for r in structure_map.regions if region_decision(r) == "review"]
+def skipped_sections(structure_map: VisionStructureMap) -> list[VisionSection]:
+    return [s for s in structure_map.sections if section_decision(s.kind) == "skip"]
+
+
+def review_sections(structure_map: VisionStructureMap) -> list[VisionSection]:
+    return [s for s in structure_map.sections if section_decision(s.kind) == "review"]
+
+
+def chapters_detected(structure_map: VisionStructureMap) -> int:
+    return len(body_chapters(structure_map))
 
 
 def build_structure_prompt(first_page: int, last_page: int) -> str:
     """Instruction for one batch of page images covering absolute pages first..last."""
+    kinds = ", ".join(SECTION_KINDS)
     return (
-        f"These are pages {first_page} to {last_page} of a PhD thesis, in order. Identify the BODY "
-        "CHAPTERS that BEGIN on any of these pages: the chapter division of the dissertation "
-        "itself, under whatever scheme the author used (arabic '1', roman 'I', or a spelled word). "
-        "A chapter begins where its heading is printed near the top of a page, for example "
-        "'CHAPTER 2' or 'II. BACKGROUND'. Do NOT report table-of-contents entries, running "
-        "headers, section or subsection headings, figure or table titles, or reference-list "
-        "entries as chapters. Separately, list which non-body REGION KINDS appear on these pages, "
-        "choosing from: table_of_contents, list_of_figures, list_of_tables, abstract, "
-        "acknowledgements, dedication, biographical_sketch, references, appendix. Use the absolute "
-        "page numbers shown. Return ONLY this JSON shape: "
-        '{"chapters":[{"number":"II","title":"BACKGROUND","start_page":' + str(first_page) + "}],"
-        '"regions":["abstract","references"]}. If no chapter begins on these pages, return an '
-        'empty "chapters" list.'
+        f"These are pages {first_page} to {last_page} of a PhD thesis, in order. Identify each "
+        "TOP-LEVEL division of the thesis that BEGINS on any of these pages, and classify what it "
+        "IS. A division begins where its heading is printed near the top of a page, for example "
+        "'CHAPTER 2', 'II. BACKGROUND', 'Abstract', or 'REFERENCES'. Do NOT report section or "
+        "subsection headings, running headers, table-of-contents entries, or figure/table titles. "
+        f"For each division give: number (the printed label or empty string), title, start_page "
+        f"(absolute, as shown), and kind, one of: {kinds}. Classify by what the division IS, "
+        "not by its number: even if the thesis numbers its references or appendix in the same "
+        "sequence as its chapters (for example 'VII. REFERENCES' or 'VIII. APPENDIX'), label "
+        "those references and appendix, NOT body_chapter. Return ONLY this JSON shape: "
+        '{"sections":[{"number":"II","title":"BACKGROUND","start_page":'
+        + str(first_page)
+        + ',"kind":"body_chapter"}]}. If no division begins on these pages, return an empty '
+        '"sections" list.'
     )
 
 
@@ -103,7 +135,8 @@ def _strip_fences(raw: str) -> str:
 
 def parse_structure_map(raw: str) -> VisionStructureMap:
     """Parse the model's reply into a typed map. Lenient and empty-on-failure: unknown keys are
-    ignored, malformed entries are skipped, non-JSON yields an empty map."""
+    ignored, malformed entries are skipped, non-JSON yields an empty map. An unrecognized kind is
+    kept verbatim and resolves to 'review' via section_decision (never a silent skip)."""
     try:
         loaded: object = json.loads(_strip_fences(raw))
     except (json.JSONDecodeError, ValueError):
@@ -112,9 +145,9 @@ def parse_structure_map(raw: str) -> VisionStructureMap:
         return VisionStructureMap()
     data = cast("dict[str, Any]", loaded)
 
-    chapters: list[VisionChapter] = []
-    raw_chapters = data.get("chapters")
-    items: list[Any] = cast("list[Any]", raw_chapters) if isinstance(raw_chapters, list) else []
+    raw_sections = data.get("sections")
+    items: list[Any] = cast("list[Any]", raw_sections) if isinstance(raw_sections, list) else []
+    sections: list[VisionSection] = []
     for item in items:
         if not isinstance(item, dict):
             continue
@@ -125,41 +158,24 @@ def parse_structure_map(raw: str) -> VisionStructureMap:
             continue
         sp = entry.get("start_page")
         start_page = sp if isinstance(sp, int) and not isinstance(sp, bool) else None
-        chapters.append(VisionChapter(number=number, title=title, start_page=start_page))
+        kind = str(entry.get("kind", "")).strip().lower() or "unknown"
+        sections.append(VisionSection(number=number, title=title, start_page=start_page, kind=kind))
 
-    regions: list[str] = []
-    # the prompt asks for "regions"; tolerate a model that still uses the older "skip_regions" key
-    raw_regions = data.get("regions")
-    if not isinstance(raw_regions, list):
-        raw_regions = data.get("skip_regions")
-    region_items: list[Any] = (
-        cast("list[Any]", raw_regions) if isinstance(raw_regions, list) else []
-    )
-    for s in region_items:
-        label = str(s).strip().lower()
-        if label and label not in regions:
-            regions.append(label)
-
-    return VisionStructureMap(chapters=chapters, regions=regions)
+    return VisionStructureMap(sections=sections)
 
 
 def merge_maps(maps: list[VisionStructureMap]) -> VisionStructureMap:
-    """Combine per-batch maps: dedupe chapters by number (then title), order by start page, and
-    union the regions. A chapter heading appears on exactly one page, so concatenation across
-    page batches plus dedupe is the whole merge."""
-    chapters: list[VisionChapter] = []
+    """Combine per-batch maps: dedupe sections by number (then title), order by start page. A
+    heading appears on exactly one page, so concatenation across page batches plus dedupe is the
+    whole merge."""
+    sections: list[VisionSection] = []
     seen: set[str] = set()
     for m in maps:
-        for ch in m.chapters:
-            key = ch.number.strip().upper() or ch.title.strip().lower()
+        for section in m.sections:
+            key = section.number.strip().upper() or section.title.strip().lower()
             if key in seen:
                 continue
             seen.add(key)
-            chapters.append(ch)
-    chapters.sort(key=lambda c: (c.start_page is None, c.start_page or 0))
-    regions = sorted({r for m in maps for r in m.regions})
-    return VisionStructureMap(chapters=chapters, regions=regions)
-
-
-def chapters_detected(structure_map: VisionStructureMap) -> int:
-    return len(structure_map.chapters)
+            sections.append(section)
+    sections.sort(key=lambda s: (s.start_page is None, s.start_page or 0))
+    return VisionStructureMap(sections=sections)

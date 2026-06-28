@@ -19,13 +19,17 @@ def _labels(**kw: object) -> Labels:
     return Labels.model_validate(base)
 
 
-def test_structure_recall() -> None:
-    labels = _labels(expected_chapters=["a", "b", "c", "d", "e", "f"])
+def test_structure_f1_penalizes_miss_and_over_detection() -> None:
+    labels = _labels(expected_chapters=["a", "b", "c", "d", "e", "f"])  # 6 expected
     assert score_structure(StructureResult(chapters_detected=0), labels).rate == 0.0
-    assert score_structure(StructureResult(chapters_detected=3), labels).rate == 0.5
     assert score_structure(StructureResult(chapters_detected=6), labels).rate == 1.0
-    # over-detection is capped at the expected count, never rewarded above 1.0
-    assert score_structure(StructureResult(chapters_detected=9), labels).rate == 1.0
+    # under-detection: recall 0.5, precision 1.0 -> F1 0.667
+    assert score_structure(StructureResult(chapters_detected=3), labels).rate == 0.667
+    # over-detection now COSTS (recall-only used to score this a perfect 1.0): recall 1.0,
+    # precision 6/9 -> F1 0.8. This is what catches "VII. REFERENCES" counted as a 7th chapter.
+    over = score_structure(StructureResult(chapters_detected=9), labels)
+    assert over.rate == 0.8
+    assert "extra" in over.misses[0]
 
 
 def test_citation_strip_substring_and_regex() -> None:

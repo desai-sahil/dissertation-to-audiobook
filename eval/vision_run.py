@@ -21,14 +21,16 @@ from eval.score import Labels, StructureResult, score_structure
 from thesis_audiobook.ports.vision import VisionClient
 from thesis_audiobook.vision_structure import (
     VISION_STRUCTURE_SYSTEM,
+    VisionSection,
     VisionStructureMap,
+    body_chapters,
     build_structure_prompt,
     chapters_detected,
     merge_maps,
     parse_structure_map,
-    read_regions,
-    review_regions,
-    skipped_regions,
+    read_sections,
+    review_sections,
+    skipped_sections,
 )
 
 HERE = Path(__file__).parent
@@ -76,16 +78,26 @@ def main() -> None:  # pragma: no cover - billed path (renders + real vision cal
     result = StructureResult(chapters_detected=chapters_detected(structure))
     score = score_structure(result, labels)
 
+    def fmt(sections: list[VisionSection]) -> str:
+        return (
+            ", ".join(f"{s.title or s.kind} ({s.kind}, p{s.start_page})" for s in sections)
+            or "(none)"
+        )
+
+    chapters = body_chapters(structure)
+    front_matter = [s for s in read_sections(structure) if s not in chapters]
+
     print(f"\n=== vision structure: {thesis_id} ===")
-    for ch in structure.chapters:
+    print("body chapters (spoken):")
+    for ch in chapters:
         print(f"  {ch.number:>4}  {ch.title}  (p{ch.start_page})")
-    print(f"read (front matter): {', '.join(read_regions(structure)) or '(none)'}")
-    print(f"skip:               {', '.join(skipped_regions(structure)) or '(none)'}")
-    review = review_regions(structure)
+    print(f"front matter (spoken): {fmt(front_matter)}")
+    print(f"skipped:               {fmt(skipped_sections(structure))}")
+    review = review_sections(structure)
     if review:
-        print(f"review (unknown kind): {', '.join(review)}")
+        print(f"review (unknown kind): {fmt(review)}")
     print(
-        f"\nstructure score: {score.passed}/{score.total} = {score.rate} "
+        f"\nstructure score (F1): {score.passed}/{score.total} = {score.rate} "
         f"(v1 baseline was 0/{len(labels.expected_chapters)} = 0.0)"
     )
 

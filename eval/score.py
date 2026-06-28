@@ -94,12 +94,28 @@ def _present(pattern: str, body_norm: str) -> bool:
 
 
 def score_structure(result: StructureResult, labels: Labels) -> DimensionScore:
-    """Chapters detected vs the real chapter count (recall, capped at the expected count)."""
+    """Chapters detected vs the real chapter count, scored as F1 so BOTH misses and over-detection
+    cost. Recall-only (the old behavior) scored 1.0 for detecting 8 chapters where 6 exist, hiding
+    that two were really references/appendix; F1 folds in precision. passed/total stays the recall
+    view (matched/expected); rate is the F1."""
     expected = len(labels.expected_chapters)
     detected = result.chapters_detected
-    passed = min(detected, expected)
-    misses = [] if detected >= expected else [f"detected {detected}/{expected} chapters"]
-    return DimensionScore.of("structure (chapters)", passed, expected, misses)
+    matched = min(detected, expected)
+    if expected == 0:
+        rate = 1.0 if detected == 0 else 0.0
+    else:
+        recall = matched / expected
+        precision = matched / detected if detected else 0.0
+        denom = precision + recall
+        rate = 0.0 if denom == 0 else round(2 * precision * recall / denom, 3)
+    misses: list[str] = []
+    if detected < expected:
+        misses.append(f"detected {detected}/{expected} (missed {expected - detected})")
+    elif detected > expected:
+        misses.append(f"detected {detected} > {expected} expected ({detected - expected} extra)")
+    return DimensionScore(
+        dimension="structure (chapters)", passed=matched, total=expected, rate=rate, misses=misses
+    )
 
 
 def score_citation_strip(script: str, labels: Labels) -> DimensionScore:

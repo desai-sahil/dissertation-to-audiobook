@@ -9,23 +9,37 @@ from eval.vision_run import collect_structure
 from thesis_audiobook.adapters.mocks import MockVision
 from thesis_audiobook.vision_structure import (
     VisionStructureMap,
+    body_chapters,
     build_structure_prompt,
     chapters_detected,
     merge_maps,
     parse_structure_map,
-    read_regions,
-    region_decision,
-    review_regions,
-    skipped_regions,
+    read_sections,
+    review_sections,
+    section_decision,
+    skipped_sections,
 )
 
-_ZHU_CHAPTERS = [
-    {"number": "I", "title": "INTRODUCTION", "start_page": 9},
-    {"number": "II", "title": "BACKGROUND", "start_page": 15},
-    {"number": "III", "title": "MATERIALS and METHODS", "start_page": 30},
-    {"number": "IV", "title": "RESULTS AND DISCUSSION", "start_page": 55},
-    {"number": "V", "title": "FUTURE WORK", "start_page": 90},
-    {"number": "VI", "title": "CONCLUSION", "start_page": 110},
+
+def _ch(number: str, title: str, page: int, kind: str = "body_chapter") -> dict[str, object]:
+    return {"number": number, "title": title, "start_page": page, "kind": kind}
+
+
+# Zhu numbers its back matter in the same roman sequence as its chapters: VII REFERENCES,
+# VIII APPENDIX. Classified by KIND, those are references/appendix, not body chapters.
+_ZHU_SECTIONS = [
+    _ch("I", "INTRODUCTION", 9),
+    _ch("II", "BACKGROUND", 15),
+    _ch("III", "MATERIALS and METHODS", 30),
+    _ch("IV", "RESULTS AND DISCUSSION", 55),
+    _ch("V", "FUTURE WORK", 90),
+    _ch("VI", "CONCLUSION", 100),
+    _ch("VII", "REFERENCES", 110, kind="references"),
+    _ch("VIII", "APPENDIX", 115, kind="appendix"),
+]
+_FRONT = [
+    _ch("", "Abstract", 5, kind="abstract"),
+    _ch("", "Acknowledgements", 6, kind="acknowledgements"),
 ]
 
 
@@ -49,109 +63,106 @@ class _FakeVision:
 
 
 def test_parse_valid_json() -> None:
-    raw = json.dumps({"chapters": _ZHU_CHAPTERS[:2], "regions": ["Abstract", "References"]})
+    raw = json.dumps({"sections": _ZHU_SECTIONS[:2]})
     m = parse_structure_map(raw)
-    assert [c.number for c in m.chapters] == ["I", "II"]
-    assert m.chapters[0].start_page == 9
-    assert m.regions == ["abstract", "references"]  # lowercased
+    assert [s.number for s in m.sections] == ["I", "II"]
+    assert m.sections[0].start_page == 9
+    assert m.sections[0].kind == "body_chapter"
 
 
-def test_parse_tolerates_legacy_skip_regions_key() -> None:
-    # an older reply that still uses "skip_regions" is read into the neutral regions field
-    m = parse_structure_map(json.dumps({"chapters": [], "skip_regions": ["appendix"]}))
-    assert m.regions == ["appendix"]
+def test_parse_lowercases_kind_and_keeps_unknown_for_review() -> None:
+    raw = json.dumps({"sections": [_ch("", "Epilogue", 8, kind="Epilogue")]})
+    m = parse_structure_map(raw)
+    assert m.sections[0].kind == "epilogue"  # lowercased, kept verbatim
+    assert section_decision(m.sections[0].kind) == "review"  # unrecognized -> review
 
 
 def test_parse_strips_code_fences() -> None:
-    raw = "```json\n" + json.dumps({"chapters": [_ZHU_CHAPTERS[0]]}) + "\n```"
+    raw = "```json\n" + json.dumps({"sections": [_ZHU_SECTIONS[0]]}) + "\n```"
     assert chapters_detected(parse_structure_map(raw)) == 1
 
 
 def test_parse_garbage_is_empty_not_crash() -> None:
-    for raw in ("not json at all", "", "[1,2,3]", '{"chapters": "oops"}'):
+    for raw in ("not json at all", "", "[1,2,3]", '{"sections": "oops"}'):
         assert parse_structure_map(raw) == VisionStructureMap()
 
 
 def test_parse_skips_malformed_entries_and_bool_pages() -> None:
     raw = json.dumps(
         {
-            "chapters": [
-                {"number": "I", "title": "INTRO", "start_page": True},  # bool is not a page
-                {"number": "", "title": ""},  # empty -> skipped
+            "sections": [
+                {"number": "I", "title": "INTRO", "start_page": True, "kind": "body_chapter"},
+                {"number": "", "title": "", "kind": "body_chapter"},  # empty -> skipped
                 "garbage",  # non-dict -> skipped
-                {"number": "II", "title": "BACKGROUND", "start_page": 15},
+                _ch("II", "BACKGROUND", 15),
+                {"number": "III", "title": "METHODS", "start_page": 30},  # missing kind -> unknown
             ]
         }
     )
     m = parse_structure_map(raw)
-    assert [c.number for c in m.chapters] == ["I", "II"]
-    assert m.chapters[0].start_page is None  # the bool was rejected
+    assert [s.number for s in m.sections] == ["I", "II", "III"]
+    assert m.sections[0].start_page is None  # the bool was rejected
+    assert m.sections[2].kind == "unknown"  # missing kind defaults to unknown (-> review)
 
 
 def test_merge_dedupes_by_number_and_orders_by_page() -> None:
-    a = parse_structure_map(json.dumps({"chapters": _ZHU_CHAPTERS[3:], "regions": ["appendix"]}))
-    b = parse_structure_map(
-        json.dumps({"chapters": _ZHU_CHAPTERS[:4], "regions": ["references"]})
-    )  # IV overlaps the batch boundary
+    a = parse_structure_map(json.dumps({"sections": _ZHU_SECTIONS[3:]}))
+    b = parse_structure_map(json.dumps({"sections": _ZHU_SECTIONS[:4]}))  # IV overlaps the boundary
     merged = merge_maps([a, b])
-    assert [c.number for c in merged.chapters] == ["I", "II", "III", "IV", "V", "VI"]  # ordered
-    assert merged.regions == ["appendix", "references"]  # unioned + sorted
+    assert [s.number for s in merged.sections] == ["I", "II", "III", "IV", "V", "VI", "VII", "VIII"]
 
 
-def test_region_policy_keeps_front_matter_skips_navigation_and_backmatter() -> None:
-    # the author's call (reaffirmed): abstract + acknowledgements are READ, not skipped.
-    assert region_decision("abstract") == "read"
-    assert region_decision("Acknowledgements") == "read"  # case-insensitive
-    assert region_decision("references") == "skip"
-    assert region_decision("table_of_contents") == "skip"
-    assert region_decision("appendix") == "skip"
-    assert region_decision("epilogue") == "review"  # unknown kind never silently skipped
+def test_body_chapters_exclude_numbered_back_matter() -> None:
+    # the bug this whole refactor fixes: VII REFERENCES / VIII APPENDIX are numbered like chapters
+    # but must NOT be counted (or read) as body chapters.
+    m = parse_structure_map(json.dumps({"sections": _FRONT + _ZHU_SECTIONS}))
+    assert [s.number for s in body_chapters(m)] == ["I", "II", "III", "IV", "V", "VI"]
+    assert chapters_detected(m) == 6  # not 8
 
-    # the exact regions vision found for Zhu split the way the user wants
-    zhu = VisionStructureMap(
-        regions=[
-            "abstract",
-            "acknowledgements",
-            "appendix",
-            "list_of_figures",
-            "references",
-            "table_of_contents",
-        ]
-    )
-    assert read_regions(zhu) == ["abstract", "acknowledgements"]
-    assert skipped_regions(zhu) == [
-        "appendix",
-        "list_of_figures",
-        "references",
-        "table_of_contents",
-    ]
-    assert review_regions(zhu) == []
+    read_titles = [s.title for s in read_sections(m)]
+    assert "Abstract" in read_titles and "Acknowledgements" in read_titles  # front matter spoken
+    assert "INTRODUCTION" in read_titles  # chapters spoken
+    skip_kinds = {s.kind for s in skipped_sections(m)}
+    assert skip_kinds == {"references", "appendix"}
+    assert review_sections(m) == []
 
 
-def test_collect_structure_batches_and_scores_against_labels() -> None:
-    # the end-to-end proof of the plumbing: IF vision returns Zhu's 6 chapters across two page
-    # batches, the harness scores structure 6/6 = 1.0 (v1 baseline was 0/6). The billed run only
-    # swaps this fake for the real client.
-    batch1 = json.dumps({"chapters": _ZHU_CHAPTERS[:3]})
-    batch2 = json.dumps({"chapters": _ZHU_CHAPTERS[3:]})
+def test_section_policy() -> None:
+    assert section_decision("body_chapter") == "read"
+    assert section_decision("Abstract") == "read"  # case-insensitive
+    assert section_decision("acknowledgements") == "read"
+    assert section_decision("references") == "skip"
+    assert section_decision("appendix") == "skip"
+    assert section_decision("table_of_contents") == "skip"
+    assert section_decision("glossary") == "review"  # unknown kind never silently skipped
+
+
+def test_collect_structure_batches_scores_and_excludes_back_matter() -> None:
+    # the end-to-end proof: vision returns 8 numbered divisions across two page batches, but only
+    # the 6 body chapters count, so the harness scores structure 6/6 = 1.0 (v1 was 0/6) AND the
+    # references/appendix land in skip, not read.
+    batch1 = json.dumps({"sections": _FRONT + _ZHU_SECTIONS[:3]})
+    batch2 = json.dumps({"sections": _ZHU_SECTIONS[3:]})
     fake = _FakeVision([batch1, batch2])
     images = [f"page{i}".encode() for i in range(60)]  # 60 pages -> 2 batches of 50/10
 
     structure = collect_structure(images, fake, batch=50)
     assert fake.calls == 2
-    assert chapters_detected(structure) == 6
+    assert chapters_detected(structure) == 6  # VII/VIII excluded
 
     labels = Labels(thesis_id="zhu", expected_chapters=["I", "II", "III", "IV", "V", "VI"])
     score = score_structure(StructureResult(chapters_detected=chapters_detected(structure)), labels)
     assert score.rate == 1.0
+    assert {s.kind for s in skipped_sections(structure)} == {"references", "appendix"}
 
 
 def test_mock_vision_is_offline_noop() -> None:
-    images = [b"p1", b"p2"]
-    structure = collect_structure(images, MockVision(), batch=50)
+    structure = collect_structure([b"p1", b"p2"], MockVision(), batch=50)
     assert structure == VisionStructureMap()  # non-JSON reply -> empty map, never bills
 
 
-def test_prompt_mentions_absolute_page_range() -> None:
+def test_prompt_classifies_by_kind_not_number() -> None:
     prompt = build_structure_prompt(51, 100)
-    assert "51 to 100" in prompt and "BODY" in prompt
+    assert "51 to 100" in prompt
+    assert "kind" in prompt and "body_chapter" in prompt and "references" in prompt
+    assert "VII. REFERENCES" in prompt  # explicitly tells the model not to call it a chapter
