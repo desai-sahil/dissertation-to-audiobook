@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Sequence
 from pathlib import Path
 
 from thesis_audiobook.audio import silent_wav, wav_duration
@@ -53,8 +54,26 @@ class MockLlm:
         return f"a mock gloss for input {token}"
 
 
+class MockVision:
+    """Offline VisionClient: ignores the images and returns a fixed non-JSON reply, so
+    parse_structure_map yields an empty map (a no-op), mirroring MockLlm. Tests that need a real
+    structure inject their own fake returning canned JSON."""
+
+    def describe(
+        self,
+        prompt: str,
+        images: Sequence[bytes],
+        *,
+        system: str | None = None,
+        max_tokens: int | None = None,
+    ) -> str:
+        return "offline mock vision: no structure read"
+
+
 class MockTts:
     """Returns a deterministic silent WAV sized from len(text). Never networks."""
+
+    cache_tag = "mock"
 
     def synthesize(self, req: TtsRequest) -> bytes:
         return silent_wav(seconds=len(req.text) / 15.0)

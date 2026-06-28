@@ -15,6 +15,8 @@ from thesis_audiobook.stages.tts import TtsStage
 class RecordingTts:
     """Records every request and returns deterministic silent audio. Never networks."""
 
+    cache_tag = "mock"
+
     def __init__(self) -> None:
         self.requests: list[TtsRequest] = []
 

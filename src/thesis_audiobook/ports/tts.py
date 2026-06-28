@@ -32,4 +32,8 @@ class TtsRequest(StrictModel):
 
 
 class TtsClient(Protocol):
+    # A short, stable id for the backend ("mock"/"elevenlabs"). It is part of the renderer's cache
+    # key so a mock render's silent audio can never be served to a real ElevenLabs render.
+    cache_tag: str
+
     def synthesize(self, req: TtsRequest) -> bytes: ...

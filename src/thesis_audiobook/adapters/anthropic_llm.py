@@ -14,7 +14,8 @@ text-extraction step is a pure function, contract-tested offline.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+import base64
+from collections.abc import Iterable, Sequence
 from typing import Any
 
 _MODEL = "claude-sonnet-4-6"  # default; the structured stages are classification, not generation
@@ -72,6 +73,36 @@ class AnthropicClient:
             max_tokens=max_tokens or self._max_tokens,
             system=system or self._system,
             messages=[{"role": "user", "content": prompt}],
+        )
+        return extract_text(message.content)
+
+    def describe(
+        self,
+        prompt: str,
+        images: Sequence[bytes],
+        *,
+        system: str | None = None,
+        max_tokens: int | None = None,
+    ) -> str:
+        # Vision call: a batch of PNG page images followed by the instruction. Same model and
+        # per-call system/max_tokens overrides as complete(); the cost guard patches this too.
+        content: list[dict[str, Any]] = [
+            {
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": "image/png",
+                    "data": base64.standard_b64encode(image).decode("ascii"),
+                },
+            }
+            for image in images
+        ]
+        content.append({"type": "text", "text": prompt})
+        message = self._client().messages.create(
+            model=self._model,
+            max_tokens=max_tokens or self._max_tokens,
+            system=system or self._system,
+            messages=[{"role": "user", "content": content}],
         )
         return extract_text(message.content)
 

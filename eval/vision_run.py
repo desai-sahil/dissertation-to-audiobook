@@ -1,0 +1,87 @@
+"""Vision structure prototype (v2, phase 3): does reading page images recover a thesis's chapters
+where the v1 text pipeline failed? Renders a PDF to page images, asks Claude (in page batches, since
+a request caps at 100 images) for the body chapters and skip regions, merges the batches, and scores
+the chapter count against the committed corpus labels.
+
+`collect_structure` is pure given an injected VisionClient + the page images, so the whole
+parse/merge/score path is unit-tested offline with a fake client. `main` is the billed path the user
+runs: it renders with poppler and calls the real AnthropicClient.
+
+    uv run python -m eval.vision_run            # default: Zhu (the thesis that scores 0/6 in v1)
+    uv run python -m eval.vision_run zhu sample/Zhu_cornell_0058O_10014.pdf 100
+"""
+
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+from eval.score import Labels, StructureResult, score_structure
+from thesis_audiobook.vision_structure import (
+    VISION_IMAGE_BATCH,
+    VISION_STRUCTURE_MAX_TOKENS,
+    VisionSection,
+    body_chapters,
+    chapters_detected,
+    collect_structure,
+    read_sections,
+    review_sections,
+    skipped_sections,
+)
+
+HERE = Path(__file__).parent
+CORPUS = HERE / "corpus"
+
+
+def main() -> None:  # pragma: no cover - billed path (renders + real vision call); user-run
+    thesis_id = sys.argv[1] if len(sys.argv) > 1 else "zhu"
+    pdf_path = (
+        Path(sys.argv[2]) if len(sys.argv) > 2 else Path("sample/Zhu_cornell_0058O_10014.pdf")
+    )
+    dpi = int(sys.argv[3]) if len(sys.argv) > 3 else 100
+
+    from thesis_audiobook.adapters.anthropic_llm import AnthropicClient
+    from thesis_audiobook.adapters.pdf_render import render_pdf_pages
+
+    print(f"rendering {pdf_path} at {dpi} dpi ...")
+    images = render_pdf_pages(pdf_path, dpi=dpi)
+    print(f"  {len(images)} pages; reading structure in batches of {VISION_IMAGE_BATCH} ...")
+
+    vision = AnthropicClient(max_tokens=VISION_STRUCTURE_MAX_TOKENS)
+    structure = collect_structure(images, vision)
+
+    labels = Labels.model_validate_json((CORPUS / thesis_id / "labels.json").read_text("utf-8"))
+    result = StructureResult(chapters_detected=chapters_detected(structure))
+    score = score_structure(result, labels)
+
+    def fmt(sections: list[VisionSection]) -> str:
+        return (
+            ", ".join(f"{s.title or s.kind} ({s.kind}, p{s.start_page})" for s in sections)
+            or "(none)"
+        )
+
+    chapters = body_chapters(structure)
+    front_matter = [s for s in read_sections(structure) if s not in chapters]
+
+    print(f"\n=== vision structure: {thesis_id} ===")
+    print("body chapters (spoken):")
+    for ch in chapters:
+        print(f"  {ch.number:>4}  {ch.title}  (p{ch.start_page})")
+    print(f"front matter (spoken): {fmt(front_matter)}")
+    print(f"skipped:               {fmt(skipped_sections(structure))}")
+    review = review_sections(structure)
+    if review:
+        print(f"review (unknown kind): {fmt(review)}")
+    print(
+        f"\nstructure score (F1): {score.passed}/{score.total} = {score.rate} "
+        f"(v1 baseline was 0/{len(labels.expected_chapters)} = 0.0)"
+    )
+
+    out = CORPUS / thesis_id / "vision_structure.json"
+    out.write_text(json.dumps(structure.model_dump(), indent=2) + "\n", encoding="utf-8")
+    print(f"wrote {out}")
+
+
+if __name__ == "__main__":
+    main()

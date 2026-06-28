@@ -138,7 +138,7 @@ def _value_words(text: str) -> list[str]:
     return [w.lower() for w in _WORD.findall(text) if w.lower() in _VALUE_WORDS]
 
 
-def _polarity_counts(text: str) -> Counter[str]:
+def polarity_counts(text: str) -> Counter[str]:
     """Count of each negation/scope word, plus any "n't" contraction as a negation."""
     counts: Counter[str] = Counter(
         word.lower() for word in _WORD.findall(text) if word.lower() in _POLARITY_WORDS
@@ -149,13 +149,13 @@ def _polarity_counts(text: str) -> Counter[str]:
     return counts
 
 
-def _direction_counts(text: str) -> Counter[str]:
+def direction_counts(text: str) -> Counter[str]:
     """Count of each directional/comparative result word - equality blocks flipping a finding
     ("increased" -> "decreased", "above" -> "below") which a content-count check cannot see."""
     return Counter(word.lower() for word in _WORD.findall(text) if word.lower() in _DIRECTION_WORDS)
 
 
-def _content_words(text: str) -> Counter[str]:
+def content_words(text: str) -> Counter[str]:
     """Multiset of content words (lowercased): not function, polarity, value, or direction words."""
     return Counter(
         word.lower()
@@ -182,11 +182,11 @@ def copyedit_guard(find: str, replace: str) -> bool:
         return False
     if _value_words(find) != _value_words(replace):
         return False
-    if _polarity_counts(find) != _polarity_counts(replace):
+    if polarity_counts(find) != polarity_counts(replace):
         return False
-    if _direction_counts(find) != _direction_counts(replace):
+    if direction_counts(find) != direction_counts(replace):
         return False
-    before, after = _content_words(find), _content_words(replace)
+    before, after = content_words(find), content_words(replace)
     removed = before - after
     added = after - before
     return sum(removed.values()) == sum(added.values()) <= 1

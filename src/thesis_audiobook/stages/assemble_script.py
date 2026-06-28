@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from thesis_audiobook.chunking import ScriptSegment, plan_chunks
 from thesis_audiobook.context import Context
+from thesis_audiobook.engine import strip_heading_enumerator
 from thesis_audiobook.ir import Block, BlockType, Document, DocumentMeta
 from thesis_audiobook.lexicon import Lexicon
 from thesis_audiobook.normalization import normalize_all
@@ -29,7 +30,9 @@ def model_supports_breaks(model_id: str) -> bool:
 
 
 def _heading_announcement(block: Block) -> str:
-    title = block.current_text()
+    # Strip the leading enumerator so "I. INTRODUCTION" reads "Introduction" (the chapter number is
+    # announced separately) and "III.A.1. Substrates" reads "Substrates".
+    title = strip_heading_enumerator(block.current_text())
     if block.section:
         return f"Section {section_to_words(block.section)}, {title}."
     if block.chapter is not None:

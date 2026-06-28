@@ -14,12 +14,15 @@ from thesis_audiobook.stages.figures import FiguresStage
 from thesis_audiobook.stages.ingest import IngestStage
 from thesis_audiobook.stages.lexicon import LexiconStage
 from thesis_audiobook.stages.math import MathStage
+from thesis_audiobook.stages.narrate import NarrateStage
 from thesis_audiobook.stages.normalize import NormalizeStage
+from thesis_audiobook.stages.page_align import PageAlignStage
 from thesis_audiobook.stages.script_qc import ScriptQcStage
 from thesis_audiobook.stages.script_repair import ScriptRepairStage
 from thesis_audiobook.stages.select import SelectStage
 from thesis_audiobook.stages.structurer import StructurerStage
 from thesis_audiobook.stages.tts import TtsStage
+from thesis_audiobook.stages.vision_cartographer import VisionCartographerStage
 
 
 def default_stages() -> list[Stage]:
@@ -44,5 +47,27 @@ def default_stages() -> list[Stage]:
     ]
 
 
+def v2_stages() -> list[Stage]:
+    """The vision-grounded engine: structure from page images, then a verifier-gated narrator,
+    replacing the v1 structurer/cartographer/select/curate/math/figures/citations/normalize/
+    script-repair/script-qc chain. Assemble/lexicon/TTS/assembly are reused wholesale."""
+    return [
+        IngestStage(),
+        BuildIrStage(),
+        PageAlignStage(),  # block -> physical page (for vision escalation), if not Marker-anchored
+        VisionCartographerStage(),
+        NarrateStage(),
+        AppendixSignpostStage(),  # one-time aside when a chapter cites a skipped appendix
+        AssembleScriptStage(),
+        LexiconStage(),
+        TtsStage(),
+        AssembleAudioStage(),
+    ]
+
+
 def build_default_pipeline() -> Pipeline:
     return Pipeline(default_stages())
+
+
+def build_v2_pipeline() -> Pipeline:
+    return Pipeline(v2_stages())

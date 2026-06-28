@@ -25,6 +25,7 @@ from thesis_audiobook.config import Config, OutputMode, ParserBackend, profile_f
 from thesis_audiobook.context import Context
 from thesis_audiobook.cost import estimate_cost
 from thesis_audiobook.curate import PronunciationPlan
+from thesis_audiobook.engine import review_gate
 from thesis_audiobook.extraction_qc import (
     EXTRACTION_QC_MAX_TOKENS,
     EXTRACTION_QC_SYSTEM,
@@ -48,7 +49,7 @@ from thesis_audiobook.ir import Chunk, Document, DocumentMeta, StructureMap
 from thesis_audiobook.ledger import render_ledger
 from thesis_audiobook.script_qc import ScriptQcReport, render_script_qc_md
 from thesis_audiobook.script_repair import render_script_repair_report
-from thesis_audiobook.stages import build_default_pipeline
+from thesis_audiobook.stages import build_default_pipeline, build_v2_pipeline
 from thesis_audiobook.stages.assemble_audio import slugify
 from thesis_audiobook.structurer import render_structure_changes
 
@@ -136,7 +137,50 @@ def _write_review_artifacts(out: Path, doc: Document) -> tuple[Path, Path]:
     return script_path, chunks_path
 
 
+def _write_v2_pairs(out: Path, doc: Document, ctx: Context) -> Path:
+    """Write the v2 (source, spoken) faithfulness pairs + flagged segments + counts, so the eval
+    harness can score faithfulness on the produced narration."""
+    outcome = ctx.narration
+    payload = {
+        "pairs": [p.model_dump() for p in outcome.pairs] if outcome else [],
+        "flagged": [f.model_dump() for f in outcome.flagged] if outcome else [],
+        "counts": (
+            {
+                "narrated": outcome.narrated,
+                "escalated": outcome.escalated,
+                "announced": outcome.announced,
+                "held": outcome.held,
+                "skipped": outcome.skipped,
+                "reviewed": outcome.reviewed,
+            }
+            if outcome
+            else {}
+        ),
+    }
+    path = out / f"{slugify(doc.meta.title)}.v2-pairs.json"
+    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    return path
+
+
 _DEFAULT_COVER = Path("cover/cover01.png")
+_DEFAULT_TEMPLATE = Path("cover/cover - generic.png")
+
+
+def _resolve_cover_v2(cover: Path | None, meta: DocumentMeta) -> tuple[bytes | None, str]:
+    """v2 cover policy: an explicit --cover wins; otherwise GENERATE one from the generic template
+    with the dissertation title + author rendered in (Newsreader title, monospace labels). Falls
+    back to the v1 static-cover behavior if the template is missing."""
+    if cover is not None:
+        if cover.exists():
+            return cover.read_bytes(), str(cover)
+        typer.echo(f"warning: cover not found: {cover}; rendering without cover art", err=True)
+        return None, "none (file not found)"
+    if _DEFAULT_TEMPLATE.exists():
+        from thesis_audiobook.adapters.cover import generate_cover
+
+        png = generate_cover(meta.title, meta.author, template=_DEFAULT_TEMPLATE.read_bytes())
+        return png, f"generated from {_DEFAULT_TEMPLATE.name}"
+    return _resolve_cover(None)
 
 
 def _resolve_cover(cover: Path | None) -> tuple[bytes | None, str]:
@@ -547,6 +591,219 @@ def run(
         typer.echo("  Real Anthropic calls (structure + curation) were used (billed); TTS mocked.")
     else:
         typer.echo("  no paid calls were made (LLM/TTS mocked).")
+
+
+@app.command(name="run-v2")
+def run_v2(
+    input_pdf: Annotated[
+        Path, typer.Argument(help="Thesis PDF (read as page images for structure).")
+    ],
+    markdown: Annotated[
+        Path, typer.Option("--markdown", help="Pre-parsed markdown: the narration SOURCE text.")
+    ],
+    llm: Annotated[
+        str, typer.Option("--llm", help="mock (offline, free no-op) or anthropic.")
+    ] = "mock",
+    llm_model: Annotated[
+        str, typer.Option("--llm-model", help="Model for vision + narration.")
+    ] = "claude-sonnet-4-6",
+    dpi: Annotated[
+        int, typer.Option("--dpi", help="Page-render DPI for the vision structure read.")
+    ] = 100,
+    profile: Annotated[
+        str, typer.Option(help="Listener profile: committee or general.")
+    ] = "committee",
+    tts: Annotated[str, typer.Option("--tts", help=_TTS_HELP)] = "mock",
+    audio_format: Annotated[str, typer.Option("--format", help=_FORMAT_HELP)] = "m4b",
+    cover: Annotated[Path | None, typer.Option("--cover", help=_COVER_HELP)] = None,
+    voice: Annotated[
+        str | None,
+        typer.Option("--voice", help="ElevenLabs voice id (required for --tts elevenlabs)."),
+    ] = None,
+    force: Annotated[
+        bool,
+        typer.Option("--force", help="Render even if the confidence gate flags NEEDS REVIEW."),
+    ] = False,
+    preview: Annotated[
+        bool,
+        typer.Option(
+            "--preview",
+            help="Render ONLY the first chapter (plus front matter) to audio - a cheap end-to-end "
+            "test of the whole pipeline. Writes a <slug>.preview.script.md and preview/ audio.",
+        ),
+    ] = False,
+    cache_dir: Annotated[Path, typer.Option(help="Content-addressed cache dir.")] = Path(
+        ".cache/tts"
+    ),
+    seed: Annotated[int, typer.Option(help="Determinism seed.")] = 0,
+    out: Annotated[Path, typer.Option(help="Output directory.")] = Path("out"),
+) -> None:
+    """v2 vision-grounded engine: structure from page images, verifier-gated narration, then audio.
+
+    Reads page images for structure (the vision cartographer), narrates each read section through
+    the verifier-gated generator, writes the reviewable script + a faithfulness-pairs sidecar, then
+    renders + assembles the audiobook (cover generated from the title/author unless --cover given).
+    COST: --llm/--tts mock are free offline stand-ins; --llm anthropic is billed but BOUNDED and
+    CACHED (<= 3 calls per segment, every call cached); --tts elevenlabs is the billed real render
+    (gated: a NEEDS REVIEW confidence stops before the render unless --force).
+    """
+    if not input_pdf.exists():
+        typer.echo(f"error: input PDF not found: {input_pdf}", err=True)
+        raise typer.Exit(code=2)
+    if not markdown.exists():
+        typer.echo(f"error: markdown not found: {markdown}", err=True)
+        raise typer.Exit(code=2)
+
+    use_real_llm = _validate_llm(llm)
+    use_real_tts = _validate_tts(tts)
+    config = Config(
+        engine="v2",
+        profile=profile_for(profile),
+        seed=seed,
+        llm_model=llm_model,
+        output_dir=str(out),
+        cache_dir=str(cache_dir),
+        parser_backend="markdown",
+        markdown_path=str(markdown),
+        output_mode=_validate_format(audio_format),
+        vision_dpi=dpi,
+    )
+    resolved_voice = voice or os.environ.get("ELEVENLABS_VOICE_ID")
+    if resolved_voice:
+        config.profile.voice_id = resolved_voice
+    if use_real_llm and not os.environ.get("ANTHROPIC_API_KEY"):
+        typer.echo("error: --llm anthropic needs ANTHROPIC_API_KEY set in this shell.", err=True)
+        raise typer.Exit(code=2)
+    if use_real_tts and not (
+        os.environ.get("ELEVENLABS_API_KEY") or os.environ.get("ELEVEN_LABS_API_KEY")
+    ):
+        typer.echo("error: --tts elevenlabs needs ELEVENLABS_API_KEY set in this shell.", err=True)
+        raise typer.Exit(code=2)
+    if use_real_tts and config.profile.voice_id in (None, "", "mock-voice"):
+        typer.echo(
+            "error: --tts elevenlabs needs a real voice; pass --voice <id> or set "
+            "ELEVENLABS_VOICE_ID",
+            err=True,
+        )
+        raise typer.Exit(code=2)
+    ctx = build_context(
+        config,
+        pdf_bytes=input_pdf.read_bytes(),
+        log_enabled=False,
+        use_real_llm=use_real_llm,
+        use_real_tts=use_real_tts,
+        status=build_terminal_reporter(),
+    )
+    if use_real_llm:
+        # I/O at the edge (composition root): render the pages the vision cartographer reads, and
+        # extract per-page text so blocks can be located on a page for vision escalation even when
+        # this thesis's Marker run emitted no page anchors.
+        from thesis_audiobook.adapters.pdf_render import extract_pages_text, render_pdf_bytes
+
+        typer.echo(f"rendering {input_pdf} at {dpi} dpi ...")
+        ctx.page_images = render_pdf_bytes(ctx.pdf_bytes, dpi=dpi)
+        ctx.page_texts = extract_pages_text(ctx.pdf_bytes)
+
+    out.mkdir(parents=True, exist_ok=True)
+    seed_doc = Document(meta=DocumentMeta(title="(pending)"))
+    pipeline = build_v2_pipeline()
+    _unavailable = (AnthropicUnavailableError, ElevenLabsUnavailableError, FfmpegUnavailableError)
+
+    # Phase A: structure + narration -> the reviewable script. Artifacts are written before any TTS
+    # spend, and the confidence gate is evaluated here.
+    try:
+        ctx.status.start()
+        doc = pipeline.run(seed_doc, ctx, to="assemble_script")
+    except _unavailable as error:
+        typer.echo(f"error: {error}", err=True)
+        raise typer.Exit(code=2) from error
+    finally:
+        ctx.status.stop()
+
+    script_path, _ = _write_review_artifacts(out, doc)
+    pairs_path = _write_v2_pairs(out, doc, ctx)
+    counts = ctx.narration
+    gate = review_gate(counts) if counts is not None else None
+
+    # The cover: an explicit --cover wins, else generate one from the title/author. Resolved here
+    # (after the script) because the generated cover needs doc.meta; written out for review.
+    cover_bytes, cover_note = _resolve_cover_v2(cover, doc.meta)
+    ctx.cover_image = cover_bytes
+    cover_path = out / f"{slugify(doc.meta.title)}.cover.png"
+    if cover_bytes is not None:
+        cover_path.write_bytes(cover_bytes)
+
+    # The confidence gate stops a billed render of confidently-broken audio (mirrors v1's QC gate).
+    if use_real_tts and gate and not force:
+        typer.echo(
+            f"  confidence: NEEDS REVIEW - {gate}\n"
+            "  Stopping before the ElevenLabs render. Review the script, then re-run with --force "
+            "to render anyway.",
+            err=True,
+        )
+        raise typer.Exit(code=3)
+
+    # Phase B: lexicon -> TTS -> assembly (mock stand-ins, or the real ElevenLabs + ffmpeg render).
+    # --preview keeps only the first chapter (+ front matter) before TTS, so the full pipeline runs
+    # end-to-end on a cheap slice; its audio goes in a preview/ subdir so it can't clobber a render.
+    slug = slugify(doc.meta.title)
+    try:
+        ctx.status.start()
+        if preview:
+            doc = pipeline.run(doc, ctx, frm="lexicon", to="lexicon")
+            doc.chunks = preview_chunks(doc.chunks)
+            preview_script_path = out / f"{slug}.preview.script.md"
+            preview_script_path.write_text("".join(c.text for c in doc.chunks), encoding="utf-8")
+            doc = pipeline.run(doc, ctx, frm="tts")
+        else:
+            doc = pipeline.run(doc, ctx, frm="lexicon")
+    except _unavailable as error:
+        typer.echo(f"error: {error}", err=True)
+        raise typer.Exit(code=2) from error
+    finally:
+        ctx.status.stop()
+
+    audio_dir = out / "preview" if preview else out
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    audio_paths: list[Path] = []
+    for blob in ctx.audio_outputs:
+        path = audio_dir / blob.filename
+        path.write_bytes(blob.data)
+        audio_paths.append(path)
+    provenance_path = audio_dir / f"{slug}.provenance.json"
+    if ctx.provenance is not None:
+        provenance_path.write_text(ctx.provenance.model_dump_json(indent=2), encoding="utf-8")
+
+    tts_backend = "elevenlabs (real)" if use_real_tts else "mock"
+    total_bytes = sum(len(blob.data) for blob in ctx.audio_outputs)
+    # Cost reflects what was actually sent to TTS (the preview slice when --preview, else all).
+    estimate = estimate_cost("".join(c.text for c in doc.chunks), config.usd_per_character)
+    scope = "  [PREVIEW: first chapter + front matter only]" if preview else ""
+    typer.echo("Thesis-to-Audiobook  (v2 engine: vision + verifier-gated narration)" + scope)
+    typer.echo(f"  reviewable script : {script_path}")
+    if preview:
+        typer.echo(f"  preview script    : {out / f'{slug}.preview.script.md'}")
+    typer.echo(f"  faithfulness pairs: {pairs_path}")
+    if counts is not None:
+        typer.echo(
+            f"  segments          : {counts.narrated} narrated ({counts.escalated} via vision), "
+            f"{counts.announced} announced, {counts.held} held, {counts.skipped} skipped, "
+            f"{counts.reviewed} review"
+        )
+        typer.echo(f"  confidence        : {'NEEDS REVIEW - ' + gate if gate else 'ok'}")
+    typer.echo(f"  cover             : {cover_note}")
+    llm_backend = "anthropic (real)" if use_real_llm else "mock"
+    typer.echo(f"  llm / tts         : {llm_backend} / {tts_backend}")
+    typer.echo(
+        f"  audio [{config.output_mode}]    : "
+        f"{', '.join(str(p) for p in audio_paths) or '(none)'} ({total_bytes} bytes)"
+    )
+    typer.echo(f"  provenance        : {provenance_path}")
+    typer.echo(f"  script chars      : {estimate.characters}")
+    if use_real_tts:
+        typer.echo(f"  TTS cost (billed) : ~{estimate.estimated_usd} ({estimate.note})")
+    else:
+        typer.echo(f"  TTS cost if real  : ~{estimate.estimated_usd} ({estimate.note})")
 
 
 @app.command()

@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 
 from thesis_audiobook.config import Config
 from thesis_audiobook.curate import PronunciationPlan
+from thesis_audiobook.engine import EngineOutcome
 from thesis_audiobook.ir import StructureMap
 from thesis_audiobook.lexicon import DEFAULT_LEXICON, Lexicon
 from thesis_audiobook.log import StructuredLogger
@@ -22,16 +23,26 @@ from thesis_audiobook.ports.parser import PdfParser
 from thesis_audiobook.ports.pronunciation import PronunciationPublisher
 from thesis_audiobook.ports.reporter import StatusReporter
 from thesis_audiobook.ports.tts import TtsClient
+from thesis_audiobook.ports.vision import VisionClient
 from thesis_audiobook.pronunciation import DictionaryLocator, PronunciationLexicon
 from thesis_audiobook.provenance import ProvenanceMap
 from thesis_audiobook.script_qc import ScriptQcReport
 from thesis_audiobook.script_repair import AppliedRepair, RejectedRepair, ScriptRepairPlan
 from thesis_audiobook.structurer import Reclassification
+from thesis_audiobook.vision_structure import VisionStructureMap
 from thesis_audiobook.warnings import WarningsSink
 
 
 def _new_byte_map() -> dict[str, bytes]:
     return {}
+
+
+def _new_bytes_list() -> list[bytes]:
+    return []
+
+
+def _new_str_list() -> list[str]:
+    return []
 
 
 def _new_str_map() -> dict[str, str]:
@@ -73,6 +84,14 @@ def _noop_reporter() -> StatusReporter:
     return NoopReporter()
 
 
+def _mock_vision() -> VisionClient:
+    # Local import keeps context.py adapter-free; the default never networks (offline-safe), and
+    # bootstrap swaps in the real AnthropicClient for a v2 run, mirroring the llm default.
+    from thesis_audiobook.adapters.mocks import MockVision
+
+    return MockVision()
+
+
 @dataclass
 class Context:
     config: Config
@@ -87,12 +106,23 @@ class Context:
     warnings: WarningsSink
     # Ephemeral terminal progress; the no-op default keeps tests/dry-run silent.
     status: StatusReporter = field(default_factory=_noop_reporter)
+    # Vision port for the v2 engine (page-image structure + notation-dense narration escalation).
+    # Defaults to the offline MockVision; bootstrap wires the real client for `--engine v2`.
+    vision: VisionClient = field(default_factory=_mock_vision)
     lexicon: Lexicon = field(default_factory=_default_lexicon)
     pronunciation_lexicon: PronunciationLexicon = field(default_factory=_empty_pronunciation)
     # Run-scoped state.
     pdf_bytes: bytes = b""
     cover_image: bytes | None = None
     structure_map: StructureMap | None = None
+    # v2 engine run-scoped state: page images (rendered by the CLI edge), the vision structure map,
+    # and the narration outcome (pairs for faithfulness scoring + flagged-for-review segments).
+    page_images: list[bytes] = field(default_factory=_new_bytes_list)
+    page_texts: list[str] = field(
+        default_factory=_new_str_list
+    )  # per-page text for block->page align
+    vision_structure: VisionStructureMap | None = None
+    narration: EngineOutcome | None = None
     reclassifications: list[Reclassification] = field(default_factory=_new_reclass)
     citation_genericizations: dict[str, str] = field(default_factory=_new_str_map)
     script_qc_report: ScriptQcReport | None = None

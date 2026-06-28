@@ -22,7 +22,10 @@ from thesis_audiobook.ir import Chunk, Document
 from thesis_audiobook.ports.tts import TtsRequest
 
 
-def chunk_cache_key(req: TtsRequest, dict_version: str) -> str:
+def chunk_cache_key(req: TtsRequest, dict_version: str, backend: str) -> str:
+    # `backend` ("mock"/"elevenlabs") is part of the key because it determines the audio bytes:
+    # the mock TTS returns a silent WAV, so without this a mock render would poison the cache and a
+    # later real render would replay that silence instead of calling ElevenLabs.
     # Deliberately excluded from the key: the pronunciation locators (a rules change
     # bumps dict_version, which IS keyed; the API-assigned version id is non-deterministic
     # so keying it would defeat the cache), and previous/next_request_ids (the renderer
@@ -40,6 +43,7 @@ def chunk_cache_key(req: TtsRequest, dict_version: str) -> str:
             "previous_text": req.previous_text,
             "next_text": req.next_text,
             "dict_version": dict_version,
+            "backend": backend,
         },
         sort_keys=True,
         ensure_ascii=False,
@@ -72,7 +76,7 @@ class TtsStage:
                 next_text=next_text,
                 locators=ctx.dictionary_locators,
             )
-            key = chunk_cache_key(request, dict_version)
+            key = chunk_cache_key(request, dict_version, ctx.tts.cache_tag)
             cached = ctx.cache.get(key)
             if cached is None:
                 audio = ctx.tts.synthesize(request)

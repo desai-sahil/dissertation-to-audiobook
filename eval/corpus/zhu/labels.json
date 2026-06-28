@@ -1,0 +1,25 @@
+{
+  "thesis_id": "zhu",
+  "title": "In-plant applications of a micro-tensiometer water stress sensor",
+  "fields": ["plant physiology", "MEMS sensors"],
+  "expected_chapters": [
+    "I. INTRODUCTION",
+    "II. BACKGROUND",
+    "III. MATERIALS and METHODS",
+    "IV. RESULTS AND DISCUSSION",
+    "V. FUTURE WORK",
+    "VI. CONCLUSION"
+  ],
+  "must_be_absent": [
+    "span id",
+    "doi:",
+    "the link in the text",
+    "re:page-?\\w+ to (zero|one)"
+  ],
+  "must_be_present": [
+    "micro-tensiometer",
+    "water potential",
+    "one point zero one"
+  ],
+  "notes": "Zhu broke the pipeline: roman-numeral, span-wrapped headings yielded 0 chapters detected (real: 6 body chapters I-VI; VII references and VIII appendix are skip regions), references/appendix were not skipped (DOIs read aloud), HTML and page-anchor markup leaked into narration, and a Penman-Monteith constant (Cp = 1.01e3, present in source) was lost to equation shredding. The treadmill failure, quantified."
+}

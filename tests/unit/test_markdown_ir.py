@@ -90,6 +90,47 @@ def test_emphasis_wrapped_section_number_is_detected() -> None:
     assert block.section == "1.2" and block.text == "Thesis Outline"
 
 
+def test_page_anchors_set_block_page_and_spans_are_stripped() -> None:
+    # Marker marks each page with <span id="page-N-M"></span> (0-indexed N). We read it into
+    # block.page (1-indexed physical) and strip the span so it never leaks into a heading/narration.
+    md = (
+        '<span id="page-9-0"></span>#### **I. INTRODUCTION**\n\n'
+        '<span id="page-9-1"></span>First paragraph of the chapter.\n\n'
+        "Continued prose, no anchor of its own.\n\n"
+        '<span id="page-10-0"></span>A paragraph on the next page.\n'
+    )
+    doc = markdown_to_document(md)
+    assert all("<span" not in b.text for b in doc.blocks)  # every span stripped
+    intro = _by_text(doc, "INTRODUCTION")
+    assert intro.text == "I. INTRODUCTION" and intro.page == 10  # 0-indexed 9 -> physical page 10
+    assert _by_text(doc, "First paragraph").page == 10
+    assert _by_text(doc, "Continued prose").page == 10  # carried forward (no anchor)
+    assert _by_text(doc, "next page").page == 11
+
+
+def test_author_from_standalone_by_line() -> None:
+    # The title page: a standalone "by" then the name block. The name (not the degree/date that
+    # follows) becomes meta.author, which the intro reads as "..., by <Author>.".
+    md = (
+        "# A TITLE PAGE\n\nA Dissertation Presented to the Faculty\n\n"
+        "by\n\nPiyush Jain\n\nAugust 2023\n\nSome opening prose of the abstract.\n"
+    )
+    assert markdown_to_document(md).meta.author == "Piyush Jain"
+
+
+def test_author_falls_back_to_copyright_line() -> None:
+    # No standalone "by", but a "(c) <year> <Name> ALL RIGHTS RESERVED" line: take the name only.
+    md = "# A TITLE\n\nFront matter.\n\n© 2020 Rui Gao ALL RIGHTS RESERVED\n\nAbstract prose.\n"
+    assert markdown_to_document(md).meta.author == "Rui Gao"
+
+
+def test_author_is_none_when_not_a_name() -> None:
+    # Conservative: a "by" followed by something that is not name-shaped yields no author, rather
+    # than narrating a wrong "by ...". The intro then simply omits the clause.
+    md = "# A TITLE\n\nby\n\nthe Graduate School of Cornell University\n\nAbstract prose here.\n"
+    assert markdown_to_document(md).meta.author is None
+
+
 def test_appendix_and_everything_after_is_backmatter() -> None:
     md = (
         "#### CHAPTER 4\n\n#### CONCLUSION\n\nSome closing prose.\n\n"

@@ -211,3 +211,41 @@ signposting; cost control, preview, chunk-level caching; chapter navigation; cro
 and statistics as a normalization category distinct from equations; gene/mutant and Greek
 pronunciation; PDF extraction-artifact handling; and the markdown-ingestion path that lets Marker run
 isolated.
+
+---
+
+## 7. The v2 direction (invert the split, ground in vision, gate on a corpus)
+
+Principle 4 above warned against a "per-thesis regex treadmill." Running real theses showed the
+treadmill survives even with LLM labels, because it moved into the *renderer*: deterministic code
+that turns labels into spoken text must enumerate an open set of surface forms (every citation shape,
+every chapter-heading scheme, every notation glyph). Zhu broke exactly there - roman-numeral,
+span-wrapped headings yielded zero detected chapters, and citation/markup leaked into the narration.
+
+The v2 reframe (decided; the build is gated on the eval harness):
+
+1. **Invert the labor split.** The model produces the *spoken text* (a constrained, faithful rewrite:
+   expand units/numbers, drop citation markers of any form, announce equations by number, keep every
+   value and claim); deterministic code *verifies invariants*. Invariants are universal so a verifier
+   generalizes; surface forms are not so a renderer does not. The cleverness moves into the verifier,
+   which becomes the most-tested component.
+2. **Ground the hard parts in the page image.** Almost every extraction failure (sup-vs-exponent,
+   dropped sigmas, page-anchor spans, inconsistently-leveled headings) is an artifact of trusting
+   lossy extracted text. The rendered page is ground truth and the model reads it directly. Vision
+   collapses the whole extraction-artifact failure class and hits structure, citations, equations,
+   and figures at once.
+
+**Tradeoff (explicit).** v1's claim-safety was *by construction* - deterministic code wrote the
+output, so it could not alter a value or claim. v2's is *bounded error*: the verifier is a floor
+(values preserved and in order, no invented number or claim, polarity/direction intact,
+near-paraphrase not free composition, a speakable-character allowlist) but cannot catch a same-arity
+semantic swap. Faithfulness therefore rests on the model + a vision QC judge + **the corpus**. That
+is why the corpus + eval harness was built first (build spec, section 7.6): it is the only thing that
+measures the residual drift v2 introduces, and the bar v2 must clear.
+
+**Target v2 pipeline.** PDF -> page images (ground truth) + light text as an alignment aid only -> a
+vision structure pass (the cartographer, grounded) -> per-segment faithful-rewrite generation
+(retiring the deterministic normalizer) -> the deterministic verifier -> an optional vision QC sweep
+-> then assemble/TTS/provenance kept wholesale. Low structure confidence or a high verifier-failure
+rate routes a thesis to human review instead of shipping confidently-broken audio. Phases land one at
+a time, each required to beat the Phase-1 baseline on its target dimension before it ships.

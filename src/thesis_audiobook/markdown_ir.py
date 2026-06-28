@@ -22,11 +22,45 @@ _SINGLE_SECTION = re.compile(r"^(\d+)\s+(\S.*)$")  # a bare integer section: "2 
 _DIVIDER = re.compile(r"(?i)^chapter\s+(\d+)$")
 _APPENDIX = re.compile(r"(?i)^appendix\b")  # an appendix heading (after any number/letter strip)
 _IMAGE = re.compile(r"^!\[(?P<alt>[^\]]*)\]\([^)]*\)\s*$")
+# Marker marks each new page with an empty anchor span, <span id="page-N-M"></span> (N is its
+# 0-indexed page). We read N to set block.page (1-indexed physical, matching the rendered pages the
+# vision passes see), and strip ALL span tags so they never pollute a heading's text or leak into
+# narration (the v1 "span id ... page nine" read-aloud bug).
+_PAGE_ANCHOR = re.compile(r'<span\s+id="page-(\d+)-\d+"\s*>\s*</span>')
+_SPAN = re.compile(r"</?span[^>]*>")
 
 
 def _is_table(lines: list[str]) -> bool:
     rows = [line for line in lines if line.strip()]
     return len(rows) >= 2 and all(row.strip().startswith("|") for row in rows)
+
+
+def _looks_like_name(text: str) -> str | None:
+    """The text if it reads like a name (2-4 words, capitalized ends, no digits), else None."""
+    words = text.split()
+    if not (2 <= len(words) <= 4) or any(c.isdigit() for c in text):
+        return None
+    if words[0][:1].isupper() and words[-1][:1].isupper():
+        return text
+    return None
+
+
+def _derive_author(blocks: list[Block]) -> str | None:
+    """Pull the author off the title page: the name block right after a standalone 'by', or failing
+    that the '(c) <year> <Name>' copyright line. Conservative - returns None rather than guess."""
+    for i in range(len(blocks) - 1):
+        if blocks[i].text.strip().lower() == "by":
+            name = _looks_like_name(blocks[i + 1].text.strip())
+            if name:
+                return name
+    for block in blocks[:20]:
+        match = re.search(r"(?:©|\(c\)|copyright)\s*\d{4}\s+(.+)", block.text, re.IGNORECASE)
+        if match:
+            candidate = re.split(r"\s+all rights", match.group(1), flags=re.IGNORECASE)[0].strip()
+            name = _looks_like_name(candidate)
+            if name:
+                return name
+    return None
 
 
 def _clean_title(content: str) -> str:
@@ -42,13 +76,19 @@ def _clean_title(content: str) -> str:
 def markdown_to_document(markdown: str, *, title: str | None = None) -> Document:
     blocks: list[Block] = []
     chapter: int | None = None
+    page: int | None = None
     derived_title: str | None = None
     seq = 0
 
     for chunk in re.split(r"\n\s*\n", markdown):
-        text = chunk.strip()
-        if not text:
+        raw = chunk.strip()
+        if not raw:
             continue
+        for anchor in _PAGE_ANCHOR.finditer(raw):
+            page = int(anchor.group(1)) + 1  # 1-indexed physical page
+        text = _SPAN.sub("", raw).strip()
+        if not text:
+            continue  # the chunk was only a page anchor / span tags
         lines = text.split("\n")
         seq += 1
         block_id = f"m{seq}"
@@ -62,6 +102,7 @@ def markdown_to_document(markdown: str, *, title: str | None = None) -> Document
                     id=block_id,
                     type=BlockType.equation_display,
                     chapter=chapter,
+                    page=page,
                     text=display,
                     latex=display,
                 )
@@ -98,6 +139,7 @@ def markdown_to_document(markdown: str, *, title: str | None = None) -> Document
                     id=block_id,
                     type=BlockType.heading,
                     chapter=chapter,
+                    page=page,
                     section=section,
                     text=content,
                 )
@@ -111,6 +153,7 @@ def markdown_to_document(markdown: str, *, title: str | None = None) -> Document
                     id=block_id,
                     type=BlockType.figure_caption,
                     chapter=chapter,
+                    page=page,
                     text=image.group("alt").strip(),
                 )
             )
@@ -118,7 +161,9 @@ def markdown_to_document(markdown: str, *, title: str | None = None) -> Document
 
         block_type = BlockType.table if _is_table(lines) else BlockType.paragraph
         flattened = text if block_type is BlockType.table else " ".join(lines)
-        blocks.append(Block(id=block_id, type=block_type, chapter=chapter, text=flattened))
+        blocks.append(
+            Block(id=block_id, type=block_type, chapter=chapter, page=page, text=flattened)
+        )
 
     # Appendices (and everything after them, e.g. a trailing bibliography or source-code listing)
     # are back matter: read only when the profile opts in (select gates BlockType.backmatter on
@@ -138,5 +183,9 @@ def markdown_to_document(markdown: str, *, title: str | None = None) -> Document
             block.type = BlockType.backmatter
 
     return Document(
-        meta=DocumentMeta(title=title or derived_title or "Untitled Thesis"), blocks=blocks
+        meta=DocumentMeta(
+            title=title or derived_title or "Untitled Thesis",
+            author=_derive_author(blocks),
+        ),
+        blocks=blocks,
     )
