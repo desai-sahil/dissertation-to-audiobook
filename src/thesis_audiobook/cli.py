@@ -163,6 +163,24 @@ def _write_v2_pairs(out: Path, doc: Document, ctx: Context) -> Path:
 
 
 _DEFAULT_COVER = Path("cover/cover01.png")
+_DEFAULT_TEMPLATE = Path("cover/cover - generic.png")
+
+
+def _resolve_cover_v2(cover: Path | None, meta: DocumentMeta) -> tuple[bytes | None, str]:
+    """v2 cover policy: an explicit --cover wins; otherwise GENERATE one from the generic template
+    with the dissertation title + author rendered in (Newsreader title, monospace labels). Falls
+    back to the v1 static-cover behavior if the template is missing."""
+    if cover is not None:
+        if cover.exists():
+            return cover.read_bytes(), str(cover)
+        typer.echo(f"warning: cover not found: {cover}; rendering without cover art", err=True)
+        return None, "none (file not found)"
+    if _DEFAULT_TEMPLATE.exists():
+        from thesis_audiobook.adapters.cover import generate_cover
+
+        png = generate_cover(meta.title, meta.author, template=_DEFAULT_TEMPLATE.read_bytes())
+        return png, f"generated from {_DEFAULT_TEMPLATE.name}"
+    return _resolve_cover(None)
 
 
 def _resolve_cover(cover: Path | None) -> tuple[bytes | None, str]:
@@ -595,19 +613,31 @@ def run_v2(
     profile: Annotated[
         str, typer.Option(help="Listener profile: committee or general.")
     ] = "committee",
+    tts: Annotated[str, typer.Option("--tts", help=_TTS_HELP)] = "mock",
+    audio_format: Annotated[str, typer.Option("--format", help=_FORMAT_HELP)] = "m4b",
+    cover: Annotated[Path | None, typer.Option("--cover", help=_COVER_HELP)] = None,
+    voice: Annotated[
+        str | None,
+        typer.Option("--voice", help="ElevenLabs voice id (required for --tts elevenlabs)."),
+    ] = None,
+    force: Annotated[
+        bool,
+        typer.Option("--force", help="Render even if the confidence gate flags NEEDS REVIEW."),
+    ] = False,
     cache_dir: Annotated[Path, typer.Option(help="Content-addressed cache dir.")] = Path(
         ".cache/tts"
     ),
     seed: Annotated[int, typer.Option(help="Determinism seed.")] = 0,
     out: Annotated[Path, typer.Option(help="Output directory.")] = Path("out"),
 ) -> None:
-    """v2 vision-grounded engine (experimental; the v1 `run` command is unchanged).
+    """v2 vision-grounded engine: structure from page images, verifier-gated narration, then audio.
 
-    Reads page images for structure (the vision cartographer), then narrates each read section
-    through the verifier-gated generator, and writes the reviewable script plus a faithfulness-pairs
-    sidecar for the eval harness. TTS is mocked here - this produces the script for review/scoring,
-    not audio. COST: --llm mock is a free offline no-op (empty script); --llm anthropic is billed
-    but BOUNDED and CACHED (<= 3 calls per segment, every call cached, so a re-run re-bills none).
+    Reads page images for structure (the vision cartographer), narrates each read section through
+    the verifier-gated generator, writes the reviewable script + a faithfulness-pairs sidecar, then
+    renders + assembles the audiobook (cover generated from the title/author unless --cover given).
+    COST: --llm/--tts mock are free offline stand-ins; --llm anthropic is billed but BOUNDED and
+    CACHED (<= 3 calls per segment, every call cached); --tts elevenlabs is the billed real render
+    (gated: a NEEDS REVIEW confidence stops before the render unless --force).
     """
     if not input_pdf.exists():
         typer.echo(f"error: input PDF not found: {input_pdf}", err=True)
@@ -617,6 +647,7 @@ def run_v2(
         raise typer.Exit(code=2)
 
     use_real_llm = _validate_llm(llm)
+    use_real_tts = _validate_tts(tts)
     config = Config(
         engine="v2",
         profile=profile_for(profile),
@@ -626,13 +657,33 @@ def run_v2(
         cache_dir=str(cache_dir),
         parser_backend="markdown",
         markdown_path=str(markdown),
+        output_mode=_validate_format(audio_format),
         vision_dpi=dpi,
     )
+    resolved_voice = voice or os.environ.get("ELEVENLABS_VOICE_ID")
+    if resolved_voice:
+        config.profile.voice_id = resolved_voice
+    if use_real_llm and not os.environ.get("ANTHROPIC_API_KEY"):
+        typer.echo("error: --llm anthropic needs ANTHROPIC_API_KEY set in this shell.", err=True)
+        raise typer.Exit(code=2)
+    if use_real_tts and not (
+        os.environ.get("ELEVENLABS_API_KEY") or os.environ.get("ELEVEN_LABS_API_KEY")
+    ):
+        typer.echo("error: --tts elevenlabs needs ELEVENLABS_API_KEY set in this shell.", err=True)
+        raise typer.Exit(code=2)
+    if use_real_tts and config.profile.voice_id in (None, "", "mock-voice"):
+        typer.echo(
+            "error: --tts elevenlabs needs a real voice; pass --voice <id> or set "
+            "ELEVENLABS_VOICE_ID",
+            err=True,
+        )
+        raise typer.Exit(code=2)
     ctx = build_context(
         config,
         pdf_bytes=input_pdf.read_bytes(),
         log_enabled=False,
         use_real_llm=use_real_llm,
+        use_real_tts=use_real_tts,
         status=build_terminal_reporter(),
     )
     if use_real_llm:
@@ -648,15 +699,64 @@ def run_v2(
     out.mkdir(parents=True, exist_ok=True)
     seed_doc = Document(meta=DocumentMeta(title="(pending)"))
     pipeline = build_v2_pipeline()
+    _unavailable = (AnthropicUnavailableError, ElevenLabsUnavailableError, FfmpegUnavailableError)
+
+    # Phase A: structure + narration -> the reviewable script. Artifacts are written before any TTS
+    # spend, and the confidence gate is evaluated here.
     try:
         ctx.status.start()
-        doc = pipeline.run(seed_doc, ctx, to="assemble_script")  # stop before TTS (no audio here)
+        doc = pipeline.run(seed_doc, ctx, to="assemble_script")
+    except _unavailable as error:
+        typer.echo(f"error: {error}", err=True)
+        raise typer.Exit(code=2) from error
     finally:
         ctx.status.stop()
 
     script_path, _ = _write_review_artifacts(out, doc)
     pairs_path = _write_v2_pairs(out, doc, ctx)
     counts = ctx.narration
+    gate = review_gate(counts) if counts is not None else None
+
+    # The cover: an explicit --cover wins, else generate one from the title/author. Resolved here
+    # (after the script) because the generated cover needs doc.meta; written out for review.
+    cover_bytes, cover_note = _resolve_cover_v2(cover, doc.meta)
+    ctx.cover_image = cover_bytes
+    cover_path = out / f"{slugify(doc.meta.title)}.cover.png"
+    if cover_bytes is not None:
+        cover_path.write_bytes(cover_bytes)
+
+    # The confidence gate stops a billed render of confidently-broken audio (mirrors v1's QC gate).
+    if use_real_tts and gate and not force:
+        typer.echo(
+            f"  confidence: NEEDS REVIEW - {gate}\n"
+            "  Stopping before the ElevenLabs render. Review the script, then re-run with --force "
+            "to render anyway.",
+            err=True,
+        )
+        raise typer.Exit(code=3)
+
+    # Phase B: lexicon -> TTS -> assembly (mock stand-ins, or the real ElevenLabs + ffmpeg render).
+    try:
+        ctx.status.start()
+        doc = pipeline.run(doc, ctx, frm="lexicon")
+    except _unavailable as error:
+        typer.echo(f"error: {error}", err=True)
+        raise typer.Exit(code=2) from error
+    finally:
+        ctx.status.stop()
+
+    audio_paths: list[Path] = []
+    for blob in ctx.audio_outputs:
+        path = out / blob.filename
+        path.write_bytes(blob.data)
+        audio_paths.append(path)
+    provenance_path = out / f"{slugify(doc.meta.title)}.provenance.json"
+    if ctx.provenance is not None:
+        provenance_path.write_text(ctx.provenance.model_dump_json(indent=2), encoding="utf-8")
+
+    tts_backend = "elevenlabs (real)" if use_real_tts else "mock"
+    total_bytes = sum(len(blob.data) for blob in ctx.audio_outputs)
+    estimate = estimate_cost(doc.script or "", config.usd_per_character)
     typer.echo("Thesis-to-Audiobook  (v2 engine: vision structure + verifier-gated narration)")
     typer.echo(f"  reviewable script : {script_path}")
     typer.echo(f"  faithfulness pairs: {pairs_path}")
@@ -666,13 +766,20 @@ def run_v2(
             f"{counts.announced} announced, {counts.held} held, {counts.skipped} skipped, "
             f"{counts.reviewed} review"
         )
-        gate = review_gate(counts)
         typer.echo(f"  confidence        : {'NEEDS REVIEW - ' + gate if gate else 'ok'}")
+    typer.echo(f"  cover             : {cover_note}")
+    llm_backend = "anthropic (real)" if use_real_llm else "mock"
+    typer.echo(f"  llm / tts         : {llm_backend} / {tts_backend}")
     typer.echo(
-        "  no paid calls were made (LLM mocked)."
-        if not use_real_llm
-        else "  Real Anthropic calls were used (billed); TTS not run."
+        f"  audio [{config.output_mode}]    : "
+        f"{', '.join(str(p) for p in audio_paths) or '(none)'} ({total_bytes} bytes)"
     )
+    typer.echo(f"  provenance        : {provenance_path}")
+    typer.echo(f"  script chars      : {estimate.characters}")
+    if use_real_tts:
+        typer.echo(f"  TTS cost (billed) : ~{estimate.estimated_usd} ({estimate.note})")
+    else:
+        typer.echo(f"  TTS cost if real  : ~{estimate.estimated_usd} ({estimate.note})")
 
 
 @app.command()

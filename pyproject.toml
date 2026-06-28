@@ -4,6 +4,7 @@ version = "0.0.0"
 description = "Convert a PhD thesis PDF into a navigable audiobook via a typed, testable pipeline."
 requires-python = ">=3.12"
 dependencies = [
+    "pillow>=10.0",
     "pydantic>=2.7",
     "typer>=0.9",
 ]
