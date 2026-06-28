@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Sequence
 from pathlib import Path
 
 from thesis_audiobook.audio import silent_wav, wav_duration
@@ -51,6 +52,22 @@ class MockLlm:
         digest = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
         token = "".join(c for c in digest if c.isalpha())[:8]
         return f"a mock gloss for input {token}"
+
+
+class MockVision:
+    """Offline VisionClient: ignores the images and returns a fixed non-JSON reply, so
+    parse_structure_map yields an empty map (a no-op), mirroring MockLlm. Tests that need a real
+    structure inject their own fake returning canned JSON."""
+
+    def describe(
+        self,
+        prompt: str,
+        images: Sequence[bytes],
+        *,
+        system: str | None = None,
+        max_tokens: int | None = None,
+    ) -> str:
+        return "offline mock vision: no structure read"
 
 
 class MockTts:

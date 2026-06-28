@@ -36,6 +36,7 @@ def _no_live_calls(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPat
         "thesis_audiobook.adapters.elevenlabs_tts.ElevenLabsPronunciation.publish", boom
     )
     monkeypatch.setattr("thesis_audiobook.adapters.anthropic_llm.AnthropicClient.complete", boom)
+    monkeypatch.setattr("thesis_audiobook.adapters.anthropic_llm.AnthropicClient.describe", boom)
 
 
 @pytest.fixture
