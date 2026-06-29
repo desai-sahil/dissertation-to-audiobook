@@ -4,7 +4,6 @@ import json
 from collections.abc import Sequence
 
 from eval.score import Labels, StructureResult, score_structure
-from eval.vision_run import collect_structure
 
 from thesis_audiobook.adapters.mocks import MockVision
 from thesis_audiobook.vision_structure import (
@@ -12,6 +11,7 @@ from thesis_audiobook.vision_structure import (
     body_chapters,
     build_structure_prompt,
     chapters_detected,
+    collect_structure,
     merge_maps,
     parse_structure_map,
     read_sections,

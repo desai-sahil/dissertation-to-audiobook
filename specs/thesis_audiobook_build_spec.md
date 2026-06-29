@@ -235,7 +235,6 @@ audiobook run-v2 INPUT.pdf  --markdown CLEAN.md  [--llm anthropic] [--tts ...] .
 audiobook parse INPUT.pdf -o ir.json                  # phases 1-2 -> IR JSON
 audiobook check-extraction  MARKER.md --llm anthropic # audit the raw markdown (read-only)
 audiobook repair-extraction MARKER.md --llm anthropic # two-pass guarded cleanup + de-shred -> *.cleaned.md
-# script / render / assemble are thin stubs that point at `run` (superseded).
 ```
 
 Key `run` flags: `--dry-run` (cost + chunk plan, zero external calls), `--preview` (first chapter,

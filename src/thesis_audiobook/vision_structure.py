@@ -12,8 +12,9 @@ number its back matter in the same sequence as its chapters: Zhu prints "VII. RE
 deterministic policy below decides read/skip, so a relabel can never silently change what is spoken.
 
 Everything here is pure (no I/O, no SDK): image rendering lives in adapters/pdf_render.py, the
-billed call behind the VisionClient port, the orchestration in eval/vision_run.py. The parser is
-lenient (empty-on-failure) so a stray field or a code fence degrades into a usable or empty map.
+billed call behind the VisionClient port, the orchestration in stages/vision_cartographer.py. The
+parser is lenient (empty-on-failure) so a stray field or a code fence degrades into a usable or
+empty map.
 """
 
 from __future__ import annotations

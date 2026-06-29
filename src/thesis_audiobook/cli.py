@@ -1,7 +1,8 @@
 """Typer CLI. The composition root: the only place (besides adapters) that does I/O.
 
-`run` drives the full pipeline; `--dry-run` is the no-call cost estimator and
-`--preview` renders only the first chapter. The other subcommands are milestone stubs.
+`run` (v1) and `run-v2` (the v2 vision engine) drive the full pipeline; `--dry-run` is the
+no-call cost estimator and `--preview` renders only the first chapter. `parse`,
+`check-extraction`, and `repair-extraction` cover the pre-pipeline phases.
 """
 
 from __future__ import annotations
@@ -115,6 +116,34 @@ def _validate_format(name: str) -> OutputMode:
     return name
 
 
+# Adapter "service unavailable" errors the pipeline catches at the edge to print a clean message
+# (not a raw SDK traceback) and exit non-zero.
+_UNAVAILABLE = (AnthropicUnavailableError, ElevenLabsUnavailableError, FfmpegUnavailableError)
+
+
+def _require_anthropic_key(use_real_llm: bool) -> None:
+    """Fail fast with a clear message (not a raw SDK traceback) if the real LLM lacks its key."""
+    if use_real_llm and not os.environ.get("ANTHROPIC_API_KEY"):
+        typer.echo("error: --llm anthropic needs ANTHROPIC_API_KEY set in this shell.", err=True)
+        raise typer.Exit(code=2)
+
+
+def _require_elevenlabs_creds(use_real_tts: bool, config: Config) -> None:
+    """Fail fast if a real ElevenLabs render lacks its API key or a real voice id."""
+    if not use_real_tts:
+        return
+    if not (os.environ.get("ELEVENLABS_API_KEY") or os.environ.get("ELEVEN_LABS_API_KEY")):
+        typer.echo("error: --tts elevenlabs needs ELEVENLABS_API_KEY set in this shell.", err=True)
+        raise typer.Exit(code=2)
+    if config.profile.voice_id in (None, "", "mock-voice"):
+        typer.echo(
+            "error: --tts elevenlabs needs a real voice; pass --voice <id> or set "
+            "ELEVENLABS_VOICE_ID",
+            err=True,
+        )
+        raise typer.Exit(code=2)
+
+
 def _chunk_plan_summary(chunks: list[Chunk], limit: int) -> str:
     if not chunks:
         return "0 chunks"
@@ -168,8 +197,8 @@ _DEFAULT_TEMPLATE = Path("cover/cover - generic.png")
 
 def _resolve_cover_v2(cover: Path | None, meta: DocumentMeta) -> tuple[bytes | None, str]:
     """v2 cover policy: an explicit --cover wins; otherwise GENERATE one from the generic template
-    with the dissertation title + author rendered in (Newsreader title, monospace labels). Falls
-    back to the v1 static-cover behavior if the template is missing."""
+    with the dissertation title + author rendered in (Newsreader title, monospace labels). Renders
+    audio-only (with a warning) if neither an explicit cover nor the template is present."""
     if cover is not None:
         if cover.exists():
             return cover.read_bytes(), str(cover)
@@ -180,7 +209,11 @@ def _resolve_cover_v2(cover: Path | None, meta: DocumentMeta) -> tuple[bytes | N
 
         png = generate_cover(meta.title, meta.author, template=_DEFAULT_TEMPLATE.read_bytes())
         return png, f"generated from {_DEFAULT_TEMPLATE.name}"
-    return _resolve_cover(None)
+    typer.echo(
+        f"warning: cover template {_DEFAULT_TEMPLATE.name} not found; rendering without cover art",
+        err=True,
+    )
+    return None, "none (no cover template)"
 
 
 def _resolve_cover(cover: Path | None) -> tuple[bytes | None, str]:
@@ -416,25 +449,8 @@ def run(
         typer.echo(f"  note           : {estimate.note}")
         return
 
-    if use_real_llm and not os.environ.get("ANTHROPIC_API_KEY"):
-        typer.echo(
-            "error: --llm anthropic needs ANTHROPIC_API_KEY set in this shell "
-            "(used by the structure map and the pronunciation curator).",
-            err=True,
-        )
-        raise typer.Exit(code=2)
-    if use_real_tts and not (
-        os.environ.get("ELEVENLABS_API_KEY") or os.environ.get("ELEVEN_LABS_API_KEY")
-    ):
-        typer.echo("error: --tts elevenlabs needs ELEVENLABS_API_KEY set in this shell.", err=True)
-        raise typer.Exit(code=2)
-    if use_real_tts and config.profile.voice_id in (None, "", "mock-voice"):
-        typer.echo(
-            "error: --tts elevenlabs needs a real voice; pass --voice <id> or set "
-            "ELEVENLABS_VOICE_ID",
-            err=True,
-        )
-        raise typer.Exit(code=2)
+    _require_anthropic_key(use_real_llm)
+    _require_elevenlabs_creds(use_real_tts, config)
 
     cover_bytes, cover_note = _resolve_cover(cover)
     ctx.cover_image = cover_bytes
@@ -446,7 +462,6 @@ def run(
         for _name in ("anthropic", "httpx", "httpcore"):
             logging.getLogger(_name).setLevel(logging.ERROR)
 
-    _unavailable = (AnthropicUnavailableError, ElevenLabsUnavailableError, FfmpegUnavailableError)
 
     # Phase 3: prepare the narration script (build IR -> structure -> select -> math ->
     # citations -> normalize -> assemble_script -> guarded script repair). Artifacts are written
@@ -455,7 +470,7 @@ def run(
     ctx.status.start()
     try:
         doc = pipeline.run(seed_doc, ctx, to="script_repair")
-    except _unavailable as error:
+    except _UNAVAILABLE as error:
         typer.echo(f"error: {error}", err=True)
         raise typer.Exit(code=2) from error
     finally:
@@ -509,7 +524,7 @@ def run(
     ctx.status.start()
     try:
         doc = pipeline.run(doc, ctx, frm="script_qc", to="script_qc")
-    except _unavailable as error:
+    except _UNAVAILABLE as error:
         typer.echo(f"error: {error}", err=True)
         raise typer.Exit(code=2) from error
     finally:
@@ -542,7 +557,7 @@ def run(
             doc = pipeline.run(doc, ctx, frm="tts")
         else:
             doc = pipeline.run(doc, ctx, frm="lexicon")
-    except _unavailable as error:
+    except _UNAVAILABLE as error:
         typer.echo(f"error: {error}", err=True)
         raise typer.Exit(code=2) from error
     finally:
@@ -671,21 +686,8 @@ def run_v2(
     resolved_voice = voice or os.environ.get("ELEVENLABS_VOICE_ID")
     if resolved_voice:
         config.profile.voice_id = resolved_voice
-    if use_real_llm and not os.environ.get("ANTHROPIC_API_KEY"):
-        typer.echo("error: --llm anthropic needs ANTHROPIC_API_KEY set in this shell.", err=True)
-        raise typer.Exit(code=2)
-    if use_real_tts and not (
-        os.environ.get("ELEVENLABS_API_KEY") or os.environ.get("ELEVEN_LABS_API_KEY")
-    ):
-        typer.echo("error: --tts elevenlabs needs ELEVENLABS_API_KEY set in this shell.", err=True)
-        raise typer.Exit(code=2)
-    if use_real_tts and config.profile.voice_id in (None, "", "mock-voice"):
-        typer.echo(
-            "error: --tts elevenlabs needs a real voice; pass --voice <id> or set "
-            "ELEVENLABS_VOICE_ID",
-            err=True,
-        )
-        raise typer.Exit(code=2)
+    _require_anthropic_key(use_real_llm)
+    _require_elevenlabs_creds(use_real_tts, config)
     ctx = build_context(
         config,
         pdf_bytes=input_pdf.read_bytes(),
@@ -707,14 +709,13 @@ def run_v2(
     out.mkdir(parents=True, exist_ok=True)
     seed_doc = Document(meta=DocumentMeta(title="(pending)"))
     pipeline = build_v2_pipeline()
-    _unavailable = (AnthropicUnavailableError, ElevenLabsUnavailableError, FfmpegUnavailableError)
 
     # Phase A: structure + narration -> the reviewable script. Artifacts are written before any TTS
     # spend, and the confidence gate is evaluated here.
     try:
         ctx.status.start()
         doc = pipeline.run(seed_doc, ctx, to="assemble_script")
-    except _unavailable as error:
+    except _UNAVAILABLE as error:
         typer.echo(f"error: {error}", err=True)
         raise typer.Exit(code=2) from error
     finally:
@@ -747,17 +748,17 @@ def run_v2(
     # --preview keeps only the first chapter (+ front matter) before TTS, so the full pipeline runs
     # end-to-end on a cheap slice; its audio goes in a preview/ subdir so it can't clobber a render.
     slug = slugify(doc.meta.title)
+    preview_script_path = out / f"{slug}.preview.script.md"
     try:
         ctx.status.start()
         if preview:
             doc = pipeline.run(doc, ctx, frm="lexicon", to="lexicon")
             doc.chunks = preview_chunks(doc.chunks)
-            preview_script_path = out / f"{slug}.preview.script.md"
             preview_script_path.write_text("".join(c.text for c in doc.chunks), encoding="utf-8")
             doc = pipeline.run(doc, ctx, frm="tts")
         else:
             doc = pipeline.run(doc, ctx, frm="lexicon")
-    except _unavailable as error:
+    except _UNAVAILABLE as error:
         typer.echo(f"error: {error}", err=True)
         raise typer.Exit(code=2) from error
     finally:
@@ -782,7 +783,7 @@ def run_v2(
     typer.echo("Thesis-to-Audiobook  (v2 engine: vision + verifier-gated narration)" + scope)
     typer.echo(f"  reviewable script : {script_path}")
     if preview:
-        typer.echo(f"  preview script    : {out / f'{slug}.preview.script.md'}")
+        typer.echo(f"  preview script    : {preview_script_path}")
     typer.echo(f"  faithfulness pairs: {pairs_path}")
     if counts is not None:
         typer.echo(
@@ -881,9 +882,7 @@ def check_extraction(
         typer.echo(f"error: markdown file not found: {markdown}", err=True)
         raise typer.Exit(code=2)
     use_real_llm = _validate_llm(llm)
-    if use_real_llm and not os.environ.get("ANTHROPIC_API_KEY"):
-        typer.echo("error: --llm anthropic needs ANTHROPIC_API_KEY set in this shell.", err=True)
-        raise typer.Exit(code=2)
+    _require_anthropic_key(use_real_llm)
 
     config = Config(cache_dir=str(cache_dir))
     ctx = build_context(config, pdf_bytes=b"", log_enabled=False, use_real_llm=use_real_llm)
@@ -948,9 +947,7 @@ def repair_extraction(
         typer.echo(f"error: markdown file not found: {markdown}", err=True)
         raise typer.Exit(code=2)
     use_real_llm = _validate_llm(llm)
-    if use_real_llm and not os.environ.get("ANTHROPIC_API_KEY"):
-        typer.echo("error: --llm anthropic needs ANTHROPIC_API_KEY set in this shell.", err=True)
-        raise typer.Exit(code=2)
+    _require_anthropic_key(use_real_llm)
 
     config = Config(cache_dir=str(cache_dir))
     ctx = build_context(config, pdf_bytes=b"", log_enabled=False, use_real_llm=use_real_llm)
@@ -979,34 +976,6 @@ def repair_extraction(
     typer.echo(f"  report      : {report_path}")
     if not use_real_llm:
         typer.echo("  (mock LLM did no real repair; pass --llm anthropic)")
-
-
-def _use_run(verb: str) -> None:
-    typer.echo(
-        f"'{verb}' is not a separate command in this build. The whole pipeline "
-        "(parse -> script -> render -> assemble) runs through `audiobook run`; see "
-        "`audiobook run --help`.",
-        err=True,
-    )
-    raise typer.Exit(code=2)
-
-
-@app.command()
-def script(ir_json: Annotated[Path, typer.Argument(help="Path to an IR JSON file.")]) -> None:
-    """Superseded by `audiobook run` (which produces the Gate B script + chunk plan)."""
-    _use_run("script")
-
-
-@app.command()
-def render(script_md: Annotated[Path, typer.Argument(help="Path to a script file.")]) -> None:
-    """Superseded by `audiobook run --tts elevenlabs` (parse through render in one pass)."""
-    _use_run("render")
-
-
-@app.command()
-def assemble(audio_dir: Annotated[Path, typer.Argument(help="Directory of audio chunks.")]) -> None:
-    """Superseded by `audiobook run` (assembly + provenance are part of the pipeline)."""
-    _use_run("assemble")
 
 
 def main() -> None:
