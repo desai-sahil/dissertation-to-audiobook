@@ -6,8 +6,6 @@
 
 # Dissertation-to-Audiobook
 
-**Turn a PhD thesis PDF into a navigable, faithful audiobook.**
-
 ## [View the project site →](https://desai-sahil.github.io/dissertation-to-audiobook/)
 
 </div>
