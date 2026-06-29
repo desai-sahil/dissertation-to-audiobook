@@ -50,5 +50,5 @@ uv sync                                              # install deps into .venv
 uv run pytest                                        # full offline test suite
 uv run ruff check . && uv run ruff format --check .  # lint + format
 uv run pyright                                       # strict type check
-uv run audiobook run sample/Chapter6_preview.pdf --dry-run
+uv run audiobook run tests/fixtures/Chapter6_preview.pdf --dry-run
 ```

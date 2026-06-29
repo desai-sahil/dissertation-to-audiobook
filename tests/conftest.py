@@ -46,7 +46,7 @@ def tiny_ir_path() -> Path:
 
 @pytest.fixture
 def sample_pdf() -> Path:
-    return REPO_ROOT / "sample" / "Chapter6_preview.pdf"
+    return REPO_ROOT / "tests" / "fixtures" / "Chapter6_preview.pdf"
 
 
 @pytest.fixture

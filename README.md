@@ -69,14 +69,14 @@ PDF --> page images (ground truth) + per-page text (alignment aid)
 
 ```bash
 # free end-to-end dry check (mock TTS): script + cover + cost estimate, no billing
-uv run audiobook run-v2 sample/Jain_cornellgrad_0058F_13867.pdf \
-  --markdown out/Jain_cornellgrad_0058F_13867.cleaned.md \
+uv run audiobook run-v2 sample/your-thesis.pdf \
+  --markdown out/your-thesis.cleaned.md \
   --llm anthropic --format mp4 --preview
 
 # the real render (billed ElevenLabs), MP4 + MP3 with the generated cover
 export ANTHROPIC_API_KEY=...  ELEVENLABS_API_KEY=...  ELEVENLABS_VOICE_ID=...
-uv run audiobook run-v2 sample/Jain_cornellgrad_0058F_13867.pdf \
-  --markdown out/Jain_cornellgrad_0058F_13867.cleaned.md \
+uv run audiobook run-v2 sample/your-thesis.pdf \
+  --markdown out/your-thesis.cleaned.md \
   --llm anthropic --tts elevenlabs --format mp4 --preview   # drop --preview for the whole book
 ```
 
@@ -128,10 +128,10 @@ uv sync          # creates .venv, installs deps
 
 ```bash
 # cost estimate + chunk plan, zero external calls:
-uv run audiobook run sample/Chapter6_preview.pdf --dry-run --parser poppler
+uv run audiobook run tests/fixtures/Chapter6_preview.pdf --dry-run --parser poppler
 
 # full pipeline on mocks -> stand-in audio + the reviewable script:
-uv run audiobook run sample/Chapter6_preview.pdf --parser poppler --tts mock
+uv run audiobook run tests/fixtures/Chapter6_preview.pdf --parser poppler --tts mock
 open out/conclusions-and-future-work.script.md
 ```
 
@@ -145,8 +145,8 @@ once; phase 3 onward is the repeatable `run`. The phase banners print as `run` e
 Marker (run standalone, outside this repo's venv) converts the PDF to markdown:
 
 ```bash
-marker_single sample/Jain_cornellgrad_0058F_13867.pdf --output_dir out/marker
-# -> out/Jain_cornellgrad_0058F_13867.md
+marker_single sample/your-thesis.pdf --output_dir out/marker
+# -> out/your-thesis.md
 ```
 
 ### Phase 2 — Extraction QC (audit, then guarded repair)
@@ -161,9 +161,9 @@ invented) — so it re-renders faithfully but can never turn `0.15` into `0.5`. 
 `*.cleaned.md` plus a `*.repair-report.md`.
 
 ```bash
-uv run audiobook check-extraction  out/Jain_cornellgrad_0058F_13867.md --llm anthropic
-uv run audiobook repair-extraction out/Jain_cornellgrad_0058F_13867.md --llm anthropic
-# -> out/Jain_cornellgrad_0058F_13867.cleaned.md  (+ a QC report)
+uv run audiobook check-extraction  out/your-thesis.md --llm anthropic
+uv run audiobook repair-extraction out/your-thesis.md --llm anthropic
+# -> out/your-thesis.cleaned.md  (+ a QC report)
 ```
 
 ### Phase 3 — Prepare the narration script
@@ -181,8 +181,8 @@ appendix (fenced or spaced-out) is typed `code` and skipped, whatever the format
 `out/<slug>.structure-changes.md`. Disable with `--no-structurer`.
 
 ```bash
-uv run audiobook run sample/Jain_cornellgrad_0058F_13867.pdf \
-  --markdown out/Jain_cornellgrad_0058F_13867.cleaned.md \
+uv run audiobook run sample/your-thesis.pdf \
+  --markdown out/your-thesis.cleaned.md \
   --llm anthropic --tts mock --format mp4
 open out/<slug>.script.md          # the reviewable spoken script
 open out/<slug>.structure.md       # the cartographer's keep/skip decisions
@@ -243,8 +243,8 @@ export ANTHROPIC_API_KEY=...
 export ELEVENLABS_API_KEY=...
 export ELEVENLABS_VOICE_ID=...     # a real voice id (or pass --voice)
 
-uv run audiobook run sample/Jain_cornellgrad_0058F_13867.pdf \
-  --markdown out/Jain_cornellgrad_0058F_13867.cleaned.md \
+uv run audiobook run sample/your-thesis.pdf \
+  --markdown out/your-thesis.cleaned.md \
   --llm anthropic --tts elevenlabs --cover cover/cover01.png --format mp4
 ```
 
