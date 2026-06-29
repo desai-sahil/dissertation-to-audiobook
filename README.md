@@ -1,6 +1,16 @@
-# Dissertation-to-Audiobook
-https://desai-sahil.github.io/dissertation-to-audiobook/
+<div align="center">
 
+<a href="https://desai-sahil.github.io/dissertation-to-audiobook/">
+  <img src="cover/cover01-web.jpg" width="380" alt="Dissertation-to-Audiobook cover">
+</a>
+
+# Dissertation-to-Audiobook
+
+**Turn a PhD thesis PDF into a navigable, faithful audiobook.**
+
+### 🎧 [Listen / View the project site →](https://desai-sahil.github.io/dissertation-to-audiobook/)
+
+</div>
 
 Convert a PhD thesis PDF into a navigable audiobook through a typed, testable pipeline:
 
