@@ -13,69 +13,69 @@
 Turn a PhD thesis PDF into a navigable, faithful audiobook: M4B / MP4 / MP3 with chapter
 markers and a cover.
 
-Faithful by construction: every value, sign, and claim is preserved. Equations are announced by
-number; figure/table captions, citation markers, and the bibliography are dropped; front matter is
-read and back matter is skipped.
+The model narrates each section and a deterministic verifier guarantees faithfulness, grounded in
+the page image so it holds up on dense, notation-heavy theses: every value, sign, and claim is
+preserved. Equations are announced by number; figure/table captions, citation markers, and the
+bibliography are dropped; front matter is read and back matter is skipped.
 
 ## Setup
 
 ```bash
 uv sync                       # the pipeline (Python 3.12+)
-brew install poppler ffmpeg   # PDF text extraction + audio assembly
+brew install poppler ffmpeg   # PDF rendering + audio assembly
+uv tool install marker-pdf    # PDF -> markdown (separate tool; its deps conflict with the pipeline's)
 ```
 
-Set three keys for a real audiobook:
+Set three keys:
 
 ```bash
-export ANTHROPIC_API_KEY=...    # the LLM passes: structure, pronunciation, QC
-export ELEVENLABS_API_KEY=...   # the narration voice
+export ANTHROPIC_API_KEY=...    # narration + structure
+export ELEVENLABS_API_KEY=...   # the voice
 export ELEVENLABS_VOICE_ID=...  # which voice
 ```
 
-Without keys, everything still runs offline on free mocks (silent audio).
-
-## Try it (offline, no keys)
-
-```bash
-uv run audiobook run tests/fixtures/Chapter6_preview.pdf --parser poppler --tts mock
-```
-
-Writes a reviewable script + stand-in audio to `out/`, with zero external calls.
-
 ## Make your audiobook
 
-Drop your thesis PDF into `sample/`.
+Drop your thesis PDF into `sample/`, then:
 
-**1. Prepare the script and check the cost** (runs the LLM passes; no audio spend yet):
+**1. Convert the PDF to markdown** (once):
 
 ```bash
-uv run audiobook run sample/your-thesis.pdf --parser poppler --llm anthropic --tts mock
+marker_single sample/your-thesis.pdf --output_dir out/marker
+# writes out/marker/your-thesis/your-thesis.md
 ```
 
-Review the script written to `out/` and the printed `est. TTS cost`.
-
-**2. Render the audiobook** (reuses the script from step 1; bills ElevenLabs):
+**2. Prepare the script and check the cost** (no audio spend yet):
 
 ```bash
-uv run audiobook run sample/your-thesis.pdf \
-  --parser poppler --llm anthropic --tts elevenlabs --format mp4
+uv run audiobook run-v2 sample/your-thesis.pdf \
+  --markdown out/marker/your-thesis/your-thesis.md \
+  --llm anthropic --format mp4
 ```
 
-**Choose your cover.** Add `--cover path/to/your-cover.png` (PNG or JPEG) to step 2 to use your own
-image. Without it, the render uses the image at `cover/cover01.png`, so you can also just replace
-that file. A square image works best (it shows for the whole runtime in the `.mp4` and as album art
-in the `.m4b`/`.mp3`).
+Review the script written to `out/` and the printed TTS cost.
+
+**3. Render the audiobook** (reuses step 2; bills ElevenLabs):
 
 ```bash
-uv run audiobook run sample/your-thesis.pdf \
-  --parser poppler --llm anthropic --tts elevenlabs --format mp4 \
+uv run audiobook run-v2 sample/your-thesis.pdf \
+  --markdown out/marker/your-thesis/your-thesis.md \
+  --llm anthropic --tts elevenlabs --format mp4
+```
+
+**Choose your cover.** A cover is generated from your thesis title and author by default. To use your
+own instead, add `--cover path/to/your-cover.png` (PNG or JPEG); a square image works best (it shows
+for the whole runtime in the `.mp4` and as album art in the `.m4b`/`.mp3`):
+
+```bash
+uv run audiobook run-v2 sample/your-thesis.pdf \
+  --markdown out/marker/your-thesis/your-thesis.md \
+  --llm anthropic --tts elevenlabs --format mp4 \
   --cover path/to/your-cover.png
 ```
 
-Outputs land in `out/`: the chaptered `.mp4`/`.m4b`, a whole-book `.mp3`, the cover, and the script.
-
-> For the highest fidelity on a dense thesis (vision-grounded narration + a cover generated from
-> your title and author), use the `run-v2` engine. See [specs/](specs/).
+Outputs land in `out/`: the chaptered `.mp4`/`.m4b`, a whole-book `.mp3`, the cover, the script,
+and a provenance sidecar.
 
 ## Develop
 
