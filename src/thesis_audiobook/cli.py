@@ -1,8 +1,8 @@
 """Typer CLI. The composition root: the only place (besides adapters) that does I/O.
 
-`run` (v1) and `run-v2` (the v2 vision engine) drive the full pipeline; `--dry-run` is the
-no-call cost estimator and `--preview` renders only the first chapter. `parse`,
-`check-extraction`, and `repair-extraction` cover the pre-pipeline phases.
+`run` is the vision-grounded engine (PDF page images + a markdown narration source); `--preview`
+renders only the first chapter. `parse`, `check-extraction`, and `repair-extraction` cover the
+pre-pipeline phases. `run-v1` is the older deterministic engine, kept (hidden) for its tests.
 """
 
 from __future__ import annotations
@@ -279,8 +279,8 @@ def _format_qa(plan: PronunciationPlan | None) -> str:
     return "\n".join(lines) + "\n"
 
 
-@app.command()
-def run(
+@app.command(name="run-v1", hidden=True)
+def run_v1(
     input_pdf: Annotated[Path, typer.Argument(help="Path to the thesis PDF.")],
     dry_run: Annotated[
         bool, typer.Option("--dry-run", help="No external calls; estimate cost + show chunk plan.")
@@ -610,8 +610,8 @@ def run(
         typer.echo("  no paid calls were made (LLM/TTS mocked).")
 
 
-@app.command(name="run-v2")
-def run_v2(
+@app.command()
+def run(
     input_pdf: Annotated[
         Path, typer.Argument(help="Thesis PDF (read as page images for structure).")
     ],
@@ -655,7 +655,7 @@ def run_v2(
     seed: Annotated[int, typer.Option(help="Determinism seed.")] = 0,
     out: Annotated[Path, typer.Option(help="Output directory.")] = Path("out"),
 ) -> None:
-    """v2 vision-grounded engine: structure from page images, verifier-gated narration, then audio.
+    """Vision-grounded engine: structure from page images, verifier-gated narration, then audio.
 
     Reads page images for structure (the vision cartographer), narrates each read section through
     the verifier-gated generator, writes the reviewable script + a faithfulness-pairs sidecar, then

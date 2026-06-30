@@ -20,7 +20,7 @@ def test_dry_run_estimates_cost_with_zero_external_calls(sample_pdf: Path, tmp_p
     result = runner.invoke(
         app,
         [
-            "run",
+            "run-v1",
             str(sample_pdf),
             "--dry-run",
             "--parser",

@@ -48,7 +48,7 @@ marker_single sample/your-thesis.pdf --output_dir out/marker
 **2. Prepare the script and check the cost** (no audio spend yet):
 
 ```bash
-uv run audiobook run-v2 sample/your-thesis.pdf \
+uv run audiobook run sample/your-thesis.pdf \
   --markdown out/marker/your-thesis/your-thesis.md \
   --llm anthropic --format mp4
 ```
@@ -58,7 +58,7 @@ Review the script written to `out/` and the printed TTS cost.
 **3. Render the audiobook** (reuses step 2; bills ElevenLabs):
 
 ```bash
-uv run audiobook run-v2 sample/your-thesis.pdf \
+uv run audiobook run sample/your-thesis.pdf \
   --markdown out/marker/your-thesis/your-thesis.md \
   --llm anthropic --tts elevenlabs --format mp4
 ```
@@ -68,7 +68,7 @@ own instead, add `--cover path/to/your-cover.png` (PNG or JPEG); a square image 
 for the whole runtime in the `.mp4` and as album art in the `.m4b`/`.mp3`):
 
 ```bash
-uv run audiobook run-v2 sample/your-thesis.pdf \
+uv run audiobook run sample/your-thesis.pdf \
   --markdown out/marker/your-thesis/your-thesis.md \
   --llm anthropic --tts elevenlabs --format mp4 \
   --cover path/to/your-cover.png

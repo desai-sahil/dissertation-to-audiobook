@@ -170,7 +170,7 @@ def test_cli_run_shows_phases_and_writes_qc_artifact(sample_pdf: Path, tmp_path:
     result = runner.invoke(
         app,
         [
-            "run",
+            "run-v1",
             str(sample_pdf),
             "--parser",
             "poppler",

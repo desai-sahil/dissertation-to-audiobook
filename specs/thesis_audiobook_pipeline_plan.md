@@ -222,7 +222,7 @@ that turns labels into spoken text must enumerate an open set of surface forms (
 every chapter-heading scheme, every notation glyph). Zhu broke exactly there - roman-numeral,
 span-wrapped headings yielded zero detected chapters, and citation/markup leaked into the narration.
 
-The v2 reframe (built and validated on the corpus; the `run-v2` command):
+The v2 reframe (built and validated on the corpus; the `run` command):
 
 1. **Invert the labor split.** The model produces the *spoken text* (a constrained, faithful rewrite:
    expand units/numbers, drop citation markers of any form, announce equations by number, keep every
@@ -243,7 +243,7 @@ semantic swap. Faithfulness therefore rests on the model + a vision QC judge + *
 is why the corpus + eval harness was built first (build spec, section 7.6): it is the only thing that
 measures the residual drift v2 introduces, and the bar v2 must clear.
 
-**The v2 pipeline (as built, `run-v2`).** PDF -> page images (poppler, ground truth) + light per-page
+**The v2 pipeline (as built, `run`).** PDF -> page images (poppler, ground truth) + light per-page
 text as a block->page alignment aid only -> a vision structure pass (the cartographer, grounded:
 labels section *kinds*, read vs skip) -> a verifier-gated narrator: the model writes the spoken text
 for each read segment, the deterministic verifier checks invariants, and a failure re-narrates then

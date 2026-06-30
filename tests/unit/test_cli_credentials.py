@@ -43,7 +43,7 @@ def test_real_llm_without_key_fails_cleanly(
     result = runner.invoke(
         app,
         [
-            "run",
+            "run-v1",
             str(sample_pdf),
             "--parser",
             "poppler",
@@ -69,7 +69,7 @@ def test_real_tts_without_key_fails_cleanly(
     result = runner.invoke(
         app,
         [
-            "run",
+            "run-v1",
             str(sample_pdf),
             "--parser",
             "poppler",

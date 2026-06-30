@@ -38,10 +38,10 @@ wins on structure and testing.
 The build history is section 13 of the engineering spec. Milestones M0 to M6 (deterministic
 core, parsing, LLM stages, TTS + assembly, hardening, cartographer), the post-M6 era
 (markdown ingestion, structurer, extraction repair, QC loop, copy-edit, ledger), and the
-**eval harness + v2 engine** are all green. The current engine is **v2** (vision-grounded,
-`run-v2`): the model narrates faithful spoken text and a deterministic verifier checks
-invariants, grounded in page images, gated on the corpus (functional spec, section 7). The
-v1 `run` command is unchanged and remains available.
+**eval harness + v2 engine** are all green. The current engine (the `run` command) is the
+vision-grounded v2: the model narrates faithful spoken text and a deterministic verifier checks
+invariants, grounded in page images, gated on the corpus (functional spec, section 7). The older
+deterministic engine is kept as the hidden `run-v1` command (still exercised by its tests).
 
 ## Common commands
 
@@ -50,5 +50,5 @@ uv sync                                              # install deps into .venv
 uv run pytest                                        # full offline test suite
 uv run ruff check . && uv run ruff format --check .  # lint + format
 uv run pyright                                       # strict type check
-uv run audiobook run tests/fixtures/Chapter6_preview.pdf --dry-run
+uv run audiobook run-v1 tests/fixtures/Chapter6_preview.pdf --dry-run   # offline deterministic engine
 ```

@@ -9,8 +9,8 @@ from thesis_audiobook.cli import app
 runner = CliRunner()
 
 
-def test_run_v2_offline_smoke(tmp_path: Path) -> None:
-    """`run-v2 --llm mock` is a free offline no-op: it ingests, runs the v2 stages on mocks
+def test_run_offline_smoke(tmp_path: Path) -> None:
+    """`run --llm mock` is a free offline no-op: it ingests, runs the v2 stages on mocks
     (empty structure -> nothing narrated), and still writes the script + pairs sidecar. Proves the
     wiring end to end without billing."""
     md = tmp_path / "thesis.md"
@@ -21,7 +21,7 @@ def test_run_v2_offline_smoke(tmp_path: Path) -> None:
     result = runner.invoke(
         app,
         [
-            "run-v2",
+            "run",
             str(pdf),
             "--markdown",
             str(md),

@@ -137,7 +137,7 @@ class Config(StrictModel):
     # standalone Marker/MinerU to produce it; see adapters/markdown_parser.py).
     markdown_path: str | None = None
     # Engine: "v1" is the deterministic-normalizer pipeline; "v2" is the vision-grounded engine
-    # (vision cartographer + verifier-gated narrator). The `run-v2` command sets this; v1 default.
+    # (vision cartographer + verifier-gated narrator). The `run` command sets this; v1 default.
     engine: str = "v1"
     # DPI for rendering PDF pages to images for the v2 vision passes (structure read).
     vision_dpi: int = 100

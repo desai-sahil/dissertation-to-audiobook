@@ -32,7 +32,7 @@ def test_chapter6_sample_renders_m4b_via_cli(sample_pdf: Path, tmp_path: Path) -
     result = runner.invoke(
         app,
         [
-            "run",
+            "run-v1",
             str(sample_pdf),
             "--parser",
             "poppler",

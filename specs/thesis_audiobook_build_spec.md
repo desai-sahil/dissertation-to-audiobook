@@ -86,7 +86,7 @@ thesis-audiobook/
     script_repair.py copyedit.py                       # the writer + the copy-edit guard
     script_qc.py ledger.py                             # phase-4 QC report + the update ledger
     chunking.py                                        # pure chunk planner
-    # --- v2 vision-grounded engine (run-v2): the model narrates, the verifier checks invariants ---
+    # --- v2 vision-grounded engine (run): the model narrates, the verifier checks invariants ---
     vision_structure.py verifier.py narrate.py engine.py page_align.py equations.py
     adapters/cover.py          # generated cover (title+author onto the template); assets/fonts/ below
     stages/                   # one module per stage; pure or port-mediated, never import adapters
@@ -109,7 +109,7 @@ thesis-audiobook/
     score.py                  # pure per-dimension scorers (output vs labels; architecture-agnostic)
     run.py                    # score the corpus -> scorecard.{md,json} (offline)
     corpus/<id>/              # labels.json + result.json + script.md snapshot (Gao, Zhu, Jain)
-    scorecard.md              # the committed v1 baseline; v2 (run-v2) is built + validated on it
+    scorecard.md              # the committed v1 baseline; v2 (run) is built + validated on it
 ```
 
 Rule of thumb: if a file under `normalization/` or `stages/` imports an SDK, `httpx`, or touches
@@ -230,21 +230,21 @@ section 7), now built and validated against it (faithfulness ~0.96-0.995 across 
 Commands map to phases and gates, so a human (or a test) can run any slice.
 
 ```
-audiobook run    INPUT.pdf [--markdown CLEAN.md] [--llm anthropic] [--tts ...] ...   # v1 engine
-audiobook run-v2 INPUT.pdf  --markdown CLEAN.md  [--llm anthropic] [--tts ...] ...   # v2 engine
+audiobook run    INPUT.pdf  --markdown CLEAN.md  [--llm anthropic] [--tts ...] ...   # vision engine
+audiobook run-v1 INPUT.pdf [--markdown CLEAN.md] [--llm anthropic] [--tts ...] ...   # legacy (hidden)
 audiobook parse INPUT.pdf -o ir.json                  # phases 1-2 -> IR JSON
 audiobook check-extraction  MARKER.md --llm anthropic # audit the raw markdown (read-only)
 audiobook repair-extraction MARKER.md --llm anthropic # two-pass guarded cleanup + de-shred -> *.cleaned.md
 ```
 
-Key `run` flags: `--dry-run` (cost + chunk plan, zero external calls), `--preview` (first chapter,
+Key `run-v1` flags: `--dry-run` (cost + chunk plan, zero external calls), `--preview` (first chapter,
 flash model), `--parser poppler|marker|mineru|markdown`, `--markdown PATH` (ingest pre-parsed
 markdown; sets `--parser markdown`), `--llm mock|anthropic`, `--llm-model`, `--verifier-model`,
 `--no-qc-loop`, `--tts mock|elevenlabs`, `--format m4b|mp4|mp3`, `--cover`, `--voice`, `--profile`,
 `--no-structurer`, `--no-structure-eval`, `--no-curate`, `--no-script-repair`, `--as-written`
 (strict notation-only, copy-edit off), `--no-script-qc`, `--force` (render past a HIGH QC flag).
 
-`run-v2` reads page images (vision cartographer) and narrates through the verifier, then reuses the
+`run` reads page images (vision cartographer) and narrates through the verifier, then reuses the
 same lexicon/TTS/assembly tail to produce the audiobook. Its flags: `--markdown PATH` (the narration
 source; required), `--llm mock|anthropic`, `--llm-model`, `--dpi` (page render), `--tts
 mock|elevenlabs`, `--format m4b|mp4|mp3`, `--cover` (omit to GENERATE one from the title+author),
@@ -257,7 +257,7 @@ a mock render never poisons a real one.
 ## 9. Claim-safety: constrained LLM output + deterministic guards
 
 This is the architectural heart of **v1** and the reason its LLM cannot hallucinate narration. The
-**v2** engine (`run-v2`) deliberately trades this by-construction safety for *bounded error*: the
+**v2** engine (`run`) deliberately trades this by-construction safety for *bounded error*: the
 model writes the spoken text and the deterministic **verifier** is the floor (functional spec,
 section 7). The guards below still apply to v2's non-narration stages, and the verifier reuses the
 same value/polarity/direction helpers.
@@ -363,11 +363,11 @@ stages) and `verifier_model` (Opus, the QC sweep/confirm); `parser_backend`, `ma
   (functional spec, section 7): invert the labor split (the model produces faithful spoken text;
   deterministic code verifies invariants) and ground the hard parts in page images, so the verifier
   generalizes where the surface-form renderer did not. *Green.*
-- **v2 engine (current, `run-v2`).** The full vision-grounded engine: a `VisionClient` port +
+- **v2 engine (current, `run`).** The full vision-grounded engine: a `VisionClient` port +
   Claude/poppler adapters; the deterministic **verifier** (faithfulness floor); the **vision
   cartographer** (read/skip section kinds from page images); the **verifier-gated narrator** with
   page-image escalation for held segments; block->page alignment; and the **audio last mile** -
-  `run-v2` runs through lexicon/TTS/assembly to produce the actual audiobook, with a **generated
+  `run` runs through lexicon/TTS/assembly to produce the actual audiobook, with a **generated
   cover** (title+author onto the template, bundled Newsreader + Space Mono), `--preview` (first
   chapter), a confidence gate before billed TTS, and a TTS cache key that includes the backend (so a
   mock render never serves silent audio to a real one). Validated across Gao, Zhu, Jain (faithfulness
