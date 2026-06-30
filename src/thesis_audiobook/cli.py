@@ -587,6 +587,8 @@ def run(
     typer.echo(f"  profile           : {config.profile.name}{scope}")
     typer.echo(f"  chunks            : {len(doc.chunks)}")
     typer.echo(f"  script chars      : {estimate.characters}")
+    if not use_real_tts:
+        typer.echo(f"  est. TTS cost     : ~{estimate.estimated_usd} ({estimate.note})")
     typer.echo(f"  reviewable script : {script_path}  (Gate B artifact)")
     typer.echo(f"  structure map     : {structure_path}  (Gate A artifact)")
     typer.echo(

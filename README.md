@@ -24,8 +24,15 @@ uv sync                       # the pipeline (Python 3.12+)
 brew install poppler ffmpeg   # PDF text extraction + audio assembly
 ```
 
-Set `ELEVENLABS_API_KEY` and `ELEVENLABS_VOICE_ID` for the render. Everything else runs offline
-on free mocks (silent audio, no keys).
+Set three keys for a real audiobook:
+
+```bash
+export ANTHROPIC_API_KEY=...    # the LLM passes: structure, pronunciation, QC
+export ELEVENLABS_API_KEY=...   # the narration voice
+export ELEVENLABS_VOICE_ID=...  # which voice
+```
+
+Without keys, everything still runs offline on free mocks (silent audio).
 
 ## Try it (offline, no keys)
 
@@ -39,18 +46,19 @@ Writes a reviewable script + stand-in audio to `out/`, with zero external calls.
 
 Drop your thesis PDF into `sample/` and put your cover at `cover/cover01.png` (or use `--cover`).
 
-**1. Prepare the script and estimate the ElevenLabs cost** (free, no keys):
+**1. Prepare the script and check the cost** (runs the LLM passes; no audio spend yet):
 
 ```bash
-uv run audiobook run sample/your-thesis.pdf --parser poppler --dry-run
+uv run audiobook run sample/your-thesis.pdf --parser poppler --llm anthropic --tts mock
 ```
 
-Review the script it writes to `out/`, and the printed cost.
+Review the script written to `out/` and the printed `est. TTS cost`.
 
-**2. Render the audiobook** (uses the keys above):
+**2. Render the audiobook** (reuses the script from step 1; bills ElevenLabs):
 
 ```bash
-uv run audiobook run sample/your-thesis.pdf --parser poppler --tts elevenlabs --format mp4
+uv run audiobook run sample/your-thesis.pdf \
+  --parser poppler --llm anthropic --tts elevenlabs --format mp4
 ```
 
 Outputs land in `out/`: the chaptered `.mp4`/`.m4b`, a whole-book `.mp3`, the cover, and the script.
