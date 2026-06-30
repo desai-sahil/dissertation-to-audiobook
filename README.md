@@ -11,7 +11,7 @@
 </div>
 
 Turn a PhD thesis PDF into a navigable, faithful audiobook: M4B / MP4 / MP3 with chapter
-markers and an auto-generated cover.
+markers and a cover.
 
 The model writes the spoken text and a **deterministic verifier** is the faithfulness floor
 (every value, sign, and claim preserved and in order; no invented numbers), with the hard parts
@@ -21,36 +21,48 @@ markers, and the bibliography are dropped; front matter is read and back matter 
 ## Setup
 
 ```bash
-uv sync   # Python 3.12+
+uv sync                       # the pipeline (Python 3.12+)
+brew install poppler ffmpeg   # PDF text extraction + audio assembly
+uv tool install marker-pdf    # PDF -> markdown (separate tool; its deps conflict with ours)
 ```
 
-Offline runs are free (deterministic mocks, silent audio). Real audio needs **poppler** and
-**ffmpeg** (`brew install poppler ffmpeg`), plus `ANTHROPIC_API_KEY` and `ELEVENLABS_API_KEY`
-with a voice id.
+For real audio, set `ANTHROPIC_API_KEY`, `ELEVENLABS_API_KEY`, and `ELEVENLABS_VOICE_ID`.
+Everything also runs offline on free mocks (silent audio, no keys).
 
-## Quickstart (offline, no keys)
+## Confirm the install (offline, no keys)
 
 ```bash
 uv run audiobook run tests/fixtures/Chapter6_preview.pdf --parser poppler --tts mock
 ```
 
-Produces the reviewable script and stand-in audio in `out/`, with no external calls.
+Writes a reviewable script + stand-in audio to `out/`, with zero external calls.
 
-## Make the audiobook
+## Make an audiobook
 
-Convert the thesis PDF to markdown with **Marker** first (`uv tool install marker-pdf`, run it
-standalone since its dependencies conflict with this project's), then:
+Drop your thesis PDF into `sample/`, then:
+
+**1. PDF → markdown** with Marker:
+
+```bash
+marker_single sample/your-thesis.pdf --output_dir out/marker
+# writes out/marker/your-thesis/your-thesis.md
+```
+
+**2. Render** the audiobook:
 
 ```bash
 export ANTHROPIC_API_KEY=...  ELEVENLABS_API_KEY=...  ELEVENLABS_VOICE_ID=...
 uv run audiobook run-v2 sample/your-thesis.pdf \
-  --markdown out/your-thesis.cleaned.md \
+  --markdown out/marker/your-thesis/your-thesis.md \
   --llm anthropic --tts elevenlabs --format mp4
 ```
 
-- `--preview` renders only the first chapter (a cheap end-to-end test).
-- `--cover <path>` overrides the cover that is otherwise generated from the title and author.
-- Drop `--tts elevenlabs` for a free mock render; it prints the real TTS cost first.
+Run it once **without** `--tts elevenlabs` first: a free dry run that writes the script and
+cover and prints the ElevenLabs cost before you spend.
+
+**Cover:** auto-generated from the title and author by default; add `--cover cover/cover01.png`
+(any PNG or JPEG) to use your own.
+**Other flags:** `--preview` (first chapter only), `--format m4b|mp4|mp3`.
 
 Outputs land in `out/`: the chaptered `.mp4`/`.m4b`, a whole-book `.mp3`, the cover, the
 reviewable script, and a provenance sidecar.
