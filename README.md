@@ -66,6 +66,12 @@ image. Without it, the render uses the image at `cover/cover01.png`, so you can 
 that file. A square image works best (it shows for the whole runtime in the `.mp4` and as album art
 in the `.m4b`/`.mp3`).
 
+```bash
+uv run audiobook run sample/your-thesis.pdf \
+  --parser poppler --llm anthropic --tts elevenlabs --format mp4 \
+  --cover path/to/your-cover.png
+```
+
 Outputs land in `out/`: the chaptered `.mp4`/`.m4b`, a whole-book `.mp3`, the cover, and the script.
 
 > For the highest fidelity on a dense thesis (vision-grounded narration + a cover generated from
