@@ -13,23 +13,21 @@
 Turn a PhD thesis PDF into a navigable, faithful audiobook: M4B / MP4 / MP3 with chapter
 markers and a cover.
 
-The model writes the spoken text and a **deterministic verifier** is the faithfulness floor
-(every value, sign, and claim preserved and in order; no invented numbers), with the hard parts
-grounded in the page image. Equations are announced by number; figure/table captions, citation
-markers, and the bibliography are dropped; front matter is read and back matter is skipped.
+Faithful by construction: every value, sign, and claim is preserved. Equations are announced by
+number; figure/table captions, citation markers, and the bibliography are dropped; front matter is
+read and back matter is skipped.
 
 ## Setup
 
 ```bash
 uv sync                       # the pipeline (Python 3.12+)
 brew install poppler ffmpeg   # PDF text extraction + audio assembly
-uv tool install marker-pdf    # PDF -> markdown (separate tool; its deps conflict with ours)
 ```
 
-For real audio, set `ANTHROPIC_API_KEY`, `ELEVENLABS_API_KEY`, and `ELEVENLABS_VOICE_ID`.
-Everything also runs offline on free mocks (silent audio, no keys).
+Set `ELEVENLABS_API_KEY` and `ELEVENLABS_VOICE_ID` for the render. Everything else runs offline
+on free mocks (silent audio, no keys).
 
-## Confirm the install (offline, no keys)
+## Try it (offline, no keys)
 
 ```bash
 uv run audiobook run tests/fixtures/Chapter6_preview.pdf --parser poppler --tts mock
@@ -37,35 +35,28 @@ uv run audiobook run tests/fixtures/Chapter6_preview.pdf --parser poppler --tts 
 
 Writes a reviewable script + stand-in audio to `out/`, with zero external calls.
 
-## Make an audiobook
+## Make your audiobook
 
-Drop your thesis PDF into `sample/`, then:
+Drop your thesis PDF into `sample/` and put your cover at `cover/cover01.png` (or use `--cover`).
 
-**1. PDF → markdown** with Marker:
-
-```bash
-marker_single sample/your-thesis.pdf --output_dir out/marker
-# writes out/marker/your-thesis/your-thesis.md
-```
-
-**2. Render** the audiobook:
+**1. Prepare the script and estimate the ElevenLabs cost** (free, no keys):
 
 ```bash
-export ANTHROPIC_API_KEY=...  ELEVENLABS_API_KEY=...  ELEVENLABS_VOICE_ID=...
-uv run audiobook run-v2 sample/your-thesis.pdf \
-  --markdown out/marker/your-thesis/your-thesis.md \
-  --llm anthropic --tts elevenlabs --format mp4
+uv run audiobook run sample/your-thesis.pdf --parser poppler --dry-run
 ```
 
-Run it once **without** `--tts elevenlabs` first: a free dry run that writes the script and
-cover and prints the ElevenLabs cost before you spend.
+Review the script it writes to `out/`, and the printed cost.
 
-**Cover:** auto-generated from the title and author by default; add `--cover cover/cover01.png`
-(any PNG or JPEG) to use your own.
-**Other flags:** `--preview` (first chapter only), `--format m4b|mp4|mp3`.
+**2. Render the audiobook** (uses the keys above):
 
-Outputs land in `out/`: the chaptered `.mp4`/`.m4b`, a whole-book `.mp3`, the cover, the
-reviewable script, and a provenance sidecar.
+```bash
+uv run audiobook run sample/your-thesis.pdf --parser poppler --tts elevenlabs --format mp4
+```
+
+Outputs land in `out/`: the chaptered `.mp4`/`.m4b`, a whole-book `.mp3`, the cover, and the script.
+
+> For the highest fidelity on a dense thesis (vision-grounded narration + a cover generated from
+> your title and author), use the `run-v2` engine. See [specs/](specs/).
 
 ## Develop
 
