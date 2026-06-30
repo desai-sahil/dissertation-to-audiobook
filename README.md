@@ -44,7 +44,7 @@ Writes a reviewable script + stand-in audio to `out/`, with zero external calls.
 
 ## Make your audiobook
 
-Drop your thesis PDF into `sample/` and put your cover at `cover/cover01.png` (or use `--cover`).
+Drop your thesis PDF into `sample/`.
 
 **1. Prepare the script and check the cost** (runs the LLM passes; no audio spend yet):
 
@@ -60,6 +60,11 @@ Review the script written to `out/` and the printed `est. TTS cost`.
 uv run audiobook run sample/your-thesis.pdf \
   --parser poppler --llm anthropic --tts elevenlabs --format mp4
 ```
+
+**Choose your cover.** Add `--cover path/to/your-cover.png` (PNG or JPEG) to step 2 to use your own
+image. Without it, the render uses the image at `cover/cover01.png`, so you can also just replace
+that file. A square image works best (it shows for the whole runtime in the `.mp4` and as album art
+in the `.m4b`/`.mp3`).
 
 Outputs land in `out/`: the chaptered `.mp4`/`.m4b`, a whole-book `.mp3`, the cover, and the script.
 
